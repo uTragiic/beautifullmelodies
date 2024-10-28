@@ -1,0 +1,56 @@
+{
+    "base_dir": "trading_system",
+    "database": {
+        "path": "data/market_data.db",
+        "update_frequency": "daily"
+    },
+    "paths": {
+        "model_dir": "models",
+        "cache_dir": "cache",
+        "results_dir": "results",
+        "log_dir": "logs"
+    },
+    "filters": {
+        "min_price": 5.0,
+        "max_price": 10000.0,
+        "min_volume": 100000,
+        "min_market_cap": 500000000,
+        "min_history_days": 252,
+        "min_dollar_volume": 1000000,
+        "max_spread_pct": 0.02,
+        "min_trading_days_pct": 0.95,
+        "max_gap_days": 5,
+        "min_price_std": 0.001
+    },
+    "clustering": {
+        "n_size_clusters": 3,
+        "n_volatility_clusters": 3,
+        "n_beta_clusters": 3,
+        "min_cluster_size": 20,
+        "max_cluster_size": 100
+    },
+    "training": {
+        "base_lookback": 500,
+        "train_test_split": 0.7,
+        "n_validation_splits": 5,
+        "batch_size": 32,
+        "learning_rate": 0.001,
+        "early_stopping_patience": 10
+    },
+    "validation": {
+        "min_window": 252,
+        "max_window": 756,
+        "n_monte_carlo": 1000,
+        "confidence_level": 0.95,
+        "min_performance_threshold": 0.5
+    },
+    "scheduling": {
+        "market_model_schedule": "0 0 * * 0",
+        "sector_model_schedule": "0 0 * * 1",
+        "cluster_model_schedule": "0 0 * * *",
+        "validation_schedule": "0 * * * *",
+        "market_hours_only": true,
+        "timezone": "America/New_York"
+    },
+    "start_scheduler": true
+}
