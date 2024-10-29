@@ -43,13 +43,6 @@ class UniverseClusterer:
                        sector_groups: Dict[str, List[str]]) -> Dict[str, Dict[str, List[str]]]:
         """
         Create hierarchical clusters within sectors.
-        
-        Args:
-            stock_features: Dictionary of stock features
-            sector_groups: Stocks grouped by sector
-            
-        Returns:
-            Dictionary of cluster assignments
         """
         try:
             logger.info("Creating stock clusters...")
@@ -62,6 +55,11 @@ class UniverseClusterer:
                     
                 # Create feature matrix for clustering
                 features_df = self._create_feature_matrix(symbols, stock_features)
+                
+                if features_df.empty:
+                    logger.warning(f"No valid features for sector {sector}")
+                    self.clusters[sector] = {'single': symbols}
+                    continue
                 
                 # Perform hierarchical clustering
                 sector_clusters = self._cluster_sector(features_df)
@@ -82,30 +80,46 @@ class UniverseClusterer:
                              symbols: List[str],
                              stock_features: Dict[str, Dict]) -> pd.DataFrame:
         """Create feature matrix for clustering."""
-        features = []
-        valid_symbols = []
-        
-        for symbol in symbols:
-            if symbol not in stock_features:
-                continue
-                
-            feature_dict = stock_features[symbol]
-            features.append({
-                'market_cap_log': np.log(feature_dict['market_cap'] + 1),
-                'volatility': feature_dict['volatility'],
-                'beta': feature_dict['beta'],
-                'volume_log': np.log(feature_dict['avg_volume'] + 1)
-            })
-            valid_symbols.append(symbol)
+        try:
+            features = []
+            valid_symbols = []
             
-        df = pd.DataFrame(features, index=valid_symbols)
-        
-        # Scale features
-        scaler = StandardScaler()
-        scaled_features = scaler.fit_transform(df)
-        self.scalers[symbols[0][:3]] = scaler  # Store scaler using sector prefix
-        
-        return pd.DataFrame(scaled_features, index=df.index, columns=df.columns)
+            for symbol in symbols:
+                if symbol not in stock_features:
+                    continue
+                    
+                feature_dict = stock_features[symbol]
+                
+                # Check if all required features exist
+                required_features = {'market_cap', 'volatility', 'beta', 'volume'}
+                if not all(feat in feature_dict for feat in required_features):
+                    logger.warning(f"Missing features for {symbol}: {required_features - set(feature_dict.keys())}")
+                    continue
+                
+                features.append({
+                    'market_cap_log': np.log(feature_dict['market_cap'] + 1),
+                    'volatility': feature_dict['volatility'],
+                    'beta': feature_dict['beta'],
+                    'volume_log': np.log(feature_dict['volume'] + 1)  # Changed from avg_volume to volume
+                })
+                valid_symbols.append(symbol)
+                
+            if not features:
+                raise ValueError("No valid features found for any symbols")
+                
+            df = pd.DataFrame(features, index=valid_symbols)
+            
+            # Scale features
+            scaler = StandardScaler()
+            scaled_features = scaler.fit_transform(df)
+            self.scalers[symbols[0][:3]] = scaler  # Store scaler using sector prefix
+            
+            logger.info(f"Created feature matrix with {len(df)} symbols and {len(df.columns)} features")
+            return pd.DataFrame(scaled_features, index=df.index, columns=df.columns)
+            
+        except Exception as e:
+            logger.error(f"Error creating feature matrix: {e}")
+            raise
         
     def _cluster_sector(self, features_df: pd.DataFrame) -> Dict[str, List[str]]:
         """Perform hierarchical clustering within a sector."""

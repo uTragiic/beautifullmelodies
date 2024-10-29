@@ -462,7 +462,7 @@ class ParameterAdjuster:
             raise Exception("Failed to fetch live data and no valid backup exists") from e
 
 class MachineLearningModel:
-    def __init__(self, lookback_period: int = 500):
+    def __init__(self, lookback_period: int = 300):
         self.lookback_period = lookback_period
         self.scaler = StandardScaler()
         self.model = RandomForestClassifier(

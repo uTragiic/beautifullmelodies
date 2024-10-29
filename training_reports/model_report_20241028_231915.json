@@ -1,0 +1,57 @@
+{
+    "timestamp": "2024-10-28T23:19:15.023085",
+    "market_regime": "normal",
+    "performance_comparison": {
+        "in_sample": {
+            "sharpe_ratio": 16.95735704409513,
+            "win_rate": 1.0,
+            "profit_factor": Infinity,
+            "max_drawdown": 0.0,
+            "volatility": 0.07514260687984789,
+            "avg_return": null,
+            "sortino_ratio": null,
+            "calmar_ratio": null,
+            "total_trades": null,
+            "winning_trades": null,
+            "losing_trades": null
+        },
+        "out_sample": {
+            "sharpe_ratio": 1.9943538043532925,
+            "win_rate": 1.0,
+            "profit_factor": 1.3827505560323448,
+            "max_drawdown": -0.016467179014638948,
+            "volatility": 0.08937754060226888,
+            "avg_return": null,
+            "sortino_ratio": null,
+            "calmar_ratio": null,
+            "total_trades": null,
+            "winning_trades": null,
+            "losing_trades": null
+        },
+        "degradation": {
+            "sharpe_ratio": 14.963003239741838,
+            "win_rate": 0.0,
+            "profit_factor": Infinity,
+            "max_drawdown": 0.016467179014638948,
+            "volatility": 0.01423493372242099
+        }
+    },
+    "overfitting_analysis": {
+        "performance_score": NaN,
+        "stability_score": 0.0,
+        "regime_score": 0.0,
+        "complexity_score": 0.22666666666666666,
+        "final_score": NaN,
+        "threshold": 0.6
+    },
+    "regime_specific_thresholds": {
+        "performance": 0.3,
+        "stability": 0.4,
+        "regime": 0.5,
+        "complexity": 0.7,
+        "final": 0.6
+    },
+    "recommendations": [
+        "Model performance is within acceptable parameters. Continue monitoring for changes in market conditions."
+    ]
+}

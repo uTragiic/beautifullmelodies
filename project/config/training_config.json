@@ -30,7 +30,7 @@
         "max_cluster_size": 100
     },
     "training": {
-        "base_lookback": 500,
+        "base_lookback": 300,
         "train_test_split": 0.7,
         "n_validation_splits": 5,
         "batch_size": 32,

@@ -1,0 +1,57 @@
+{
+    "timestamp": "2024-10-29T00:38:47.356090",
+    "market_regime": "normal",
+    "performance_comparison": {
+        "in_sample": {
+            "sharpe_ratio": 12.435327214774158,
+            "win_rate": 1.0,
+            "profit_factor": 12.654487020763517,
+            "max_drawdown": -0.0028793441431358116,
+            "volatility": 0.07771532715493616,
+            "avg_return": null,
+            "sortino_ratio": null,
+            "calmar_ratio": null,
+            "total_trades": null,
+            "winning_trades": null,
+            "losing_trades": null
+        },
+        "out_sample": {
+            "sharpe_ratio": 7.953998371188453,
+            "win_rate": 1.0,
+            "profit_factor": 3.8380590012206266,
+            "max_drawdown": -0.01358980057041104,
+            "volatility": 0.07863743029114686,
+            "avg_return": null,
+            "sortino_ratio": null,
+            "calmar_ratio": null,
+            "total_trades": null,
+            "winning_trades": null,
+            "losing_trades": null
+        },
+        "degradation": {
+            "sharpe_ratio": 4.481328843585706,
+            "win_rate": 0.0,
+            "profit_factor": 8.81642801954289,
+            "max_drawdown": 0.01071045642727523,
+            "volatility": 0.0009221031362107029
+        }
+    },
+    "overfitting_analysis": {
+        "performance_score": 0.41378792960575456,
+        "stability_score": 0.0,
+        "regime_score": 0.0,
+        "complexity_score": 0.22666666666666666,
+        "final_score": 0.1881818385089685,
+        "threshold": 0.6
+    },
+    "regime_specific_thresholds": {
+        "performance": 0.3,
+        "stability": 0.4,
+        "regime": 0.5,
+        "complexity": 0.7,
+        "final": 0.6
+    },
+    "recommendations": [
+        "Significant performance degradation detected. Consider implementing more robust cross-validation techniques."
+    ]
+}

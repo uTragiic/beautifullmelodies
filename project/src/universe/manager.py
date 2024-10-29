@@ -197,11 +197,13 @@ class UniverseManager:
                         
                     # Calculate basic features
                     returns = data['close'].pct_change()
+                    volume = data['volume'].mean()  # Store as 'volume' instead of 'avg_volume'
+                    
                     self.stock_features[symbol] = {
                         'volatility': returns.std() * np.sqrt(252),
-                        'avg_volume': data['volume'].mean(),
+                        'volume': volume,  # Changed from 'avg_volume' to 'volume'
                         'price': data['close'].iloc[-1],
-                        'market_cap': data['close'].iloc[-1] * data['volume'].iloc[-1],
+                        'market_cap': data['close'].iloc[-1] * volume,
                         'beta': self._calculate_beta(returns)
                     }
                     

@@ -146,15 +146,16 @@ def train_models(config_path: str):
         # Training timeframes
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_dates = {
-            'market': (datetime.now() - timedelta(days=365*2)).strftime('%Y-%m-%d'),
-            'sector': (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d'),
-            'cluster': (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
+            'market': (datetime.now() - timedelta(days=365*5)).strftime('%Y-%m-%d'),
+            'sector': (datetime.now() - timedelta(days=365*5)).strftime('%Y-%m-%d'),
+            'cluster': (datetime.now() - timedelta(days=365*5)).strftime('%Y-%m-%d')
         }
         
         # Train market model
         logger.info("Training market model...")
         market_results = trainer._train_market_model(start_dates['market'], end_date)
-        
+        logger.info(f"Requesting data from {start_dates['market']} to {end_date}")
+
         # Validate market model
         market_metrics, market_details = validator.validate_model(
             model=trainer.market_model,

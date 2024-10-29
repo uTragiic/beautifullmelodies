@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class TrainingConfig:
     """Configuration for model training."""
     def __init__(self,
-                 base_lookback: int = 500,
+                 base_lookback: int = 300,
                  train_test_split: float = 0.7,
                  n_validation_splits: int = 5,
                  min_train_samples: int = 252,

@@ -12,7 +12,11 @@ from joblib import Parallel, delayed
 from sklearn.model_selection import TimeSeriesSplit
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
+from concurrent.futures import ThreadPoolExecutor
+from ta.trend import EMAIndicator, MACD, ADXIndicator, SMAIndicator
+from ta.momentum import RSIIndicator, StochasticOscillator
+from ta.volatility import AverageTrueRange, BollingerBands
+from ta.volume import OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
 # Local Imports
 from ..core.performance_metrics import PerformanceMetrics
 from ..core.types import MarketRegime
@@ -44,26 +48,25 @@ class EnhancedBacktest:
     and Monte Carlo simulation capabilities.
     """
 
-    def __init__(self, 
-             data: pd.DataFrame, 
-             initial_capital: float = 100000,
-             config: Optional[BacktestConfig] = None):
+    def __init__(self, data: pd.DataFrame, initial_capital: float = 100000):
         """
         Initialize the backtesting system.
 
         Args:
-            data: DataFrame containing OHLCV price data
-            initial_capital: Initial capital amount
-            config: Backtesting configuration
+            data: DataFrame containing market data
+            initial_capital: Initial trading capital
+
+        Raises:
+            ValueError: If input data is invalid
         """
         try:
-            # Define required columns
-            required_columns = ['open', 'high', 'low', 'close', 'volume']
-            
-            # Validate the DataFrame
+            # Validate data
             if not isinstance(data, pd.DataFrame):
                 raise ValueError("Input data must be a pandas DataFrame")
                 
+            # Define required columns
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
+            
             # Convert column names to lowercase
             data.columns = data.columns.str.lower()
             
@@ -108,77 +111,186 @@ class EnhancedBacktest:
             # Check minimum data points
             if len(data) < 100:  # Minimum required for backtesting
                 raise ValueError(f"Insufficient data points: {len(data)} < 100")
-                
-            # Store validated data
-            self.data = data.copy()
+
+            # Calculate indicators and store data
+            self.data = self._calculate_indicators(data)
             self.initial_capital = initial_capital
             self.results = None
-            
-            # Store configuration
-            self.config = config or BacktestConfig()
             
             logger.info(f"Backtest initialized with {len(data)} data points")
             
         except Exception as e:
             logger.error(f"Error initializing backtest system: {e}")
-            raise ValueError(f"Invalid input data: {str(e)}")
+            raise
 
 
-    def run_backtest(self, strategy: Any, n_splits: Optional[int] = None) -> pd.DataFrame:
+    def _calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Run the backtest with walk-forward optimization.
+        Calculate all required technical indicators consistently with other classes.
         
         Args:
-            strategy: Trading strategy object with generate_signals method
-            n_splits: Optional number of splits (will be calculated automatically if None)
+            data: DataFrame with OHLCV data
             
+        Returns:
+            DataFrame with calculated indicators
+        """
+        try:
+            df = data.copy()
+            
+            # Moving Averages
+            df['SMA_50'] = df['close'].rolling(window=50).mean()
+            df['SMA_200'] = df['close'].rolling(window=200).mean()
+            
+            # RSI and normalized RSI
+            rsi = RSIIndicator(close=df['close'], window=14)
+            df['RSI'] = rsi.rsi()
+            # Calculate RSI Z-score
+            df['RSI_Z'] = (df['RSI'] - df['RSI'].rolling(window=50).mean()) / df['RSI'].rolling(window=50).std()
+            
+            # MACD Components
+            macd = MACD(close=df['close'], window_slow=26, window_fast=12, window_sign=9)
+            df['MACD'] = macd.macd()
+            df['MACD_signal'] = macd.macd_signal()
+            df['MACD_diff'] = macd.macd_diff()
+            # Calculate MACD Z-score
+            df['MACD_Z'] = (df['MACD_diff'] - df['MACD_diff'].rolling(window=50).mean()) / df['MACD_diff'].rolling(window=50).std()
+            
+            # ADX
+            adx = ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14)
+            df['ADX'] = adx.adx()
+            
+            # ATR
+            atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14)
+            df['ATR'] = atr.average_true_range()
+            
+            # Volume Indicators
+            df['Volume_SMA'] = df['volume'].rolling(window=20).mean()
+            df['Volume_Ratio'] = df['volume'] / df['Volume_SMA']
+            
+            # On-Balance Volume
+            obv = OnBalanceVolumeIndicator(close=df['close'], volume=df['volume'])
+            df['OBV'] = obv.on_balance_volume()
+            
+            # VWAP
+            vwap = VolumeWeightedAveragePrice(high=df['high'], low=df['low'], close=df['close'], volume=df['volume'])
+            df['VWAP'] = vwap.volume_weighted_average_price()
+            
+            # Stochastic Oscillator
+            stoch = StochasticOscillator(high=df['high'], low=df['low'], close=df['close'], window=14, smooth_window=3)
+            df['Stoch_K'] = stoch.stoch()
+            df['Stoch_D'] = stoch.stoch_signal()
+            
+            # Bollinger Bands
+            bb = BollingerBands(close=df['close'], window=20, window_dev=2)
+            df['BB_upper'] = bb.bollinger_hband()
+            df['BB_lower'] = bb.bollinger_lband()
+            df['BB_width'] = (df['BB_upper'] - df['BB_lower']) / df['close']
+            
+            # Momentum
+            df['Momentum'] = df['close'].pct_change(periods=20)
+            
+            # Forward fill any NaN values
+            df = df.fillna(method='ffill')
+            
+            # Verify all required indicators are present
+            required_indicators = [
+                'SMA_50', 'SMA_200', 'RSI', 'RSI_Z', 'MACD', 'MACD_signal', 
+                'MACD_diff', 'MACD_Z', 'ADX', 'ATR', 'OBV', 'VWAP', 'Stoch_K', 
+                'Stoch_D', 'BB_width', 'Volume_Ratio', 'Momentum'
+            ]
+            
+            missing_indicators = [ind for ind in required_indicators if ind not in df.columns]
+            if missing_indicators:
+                raise ValueError(f"Failed to calculate indicators: {missing_indicators}")
+            
+            # Log successful calculation
+            logger.info("Technical indicators calculated successfully")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error calculating indicators: {e}")
+            raise
+
+    def run_backtest(self, strategy, n_splits: int = 5, n_jobs: int = -1) -> pd.DataFrame:
+        """
+        Run backtesting with walk-forward optimization.
+
+        Args:
+            strategy: Trading strategy to test
+            n_splits: Number of time series splits
+            n_jobs: Number of parallel jobs
+
         Returns:
             DataFrame containing backtest results
         """
         try:
-            # Calculate optimal number of splits based on data size
+            # Ensure sufficient data
+            min_samples = 100  # Minimum required for reliable training
             data_length = len(self.data)
-            min_samples_per_split = 100  # Minimum samples needed for reliable training
-            
-            if n_splits is None:
-                # Dynamically calculate number of splits
-                n_splits = max(2, min(5, data_length // (2 * min_samples_per_split)))
-            
-            # Ensure we have enough data for the requested splits
-            min_required_samples = n_splits * min_samples_per_split * 2  # *2 for train/test
-            if data_length < min_required_samples:
-                logger.warning(
-                    f"Insufficient data for {n_splits} splits. "
-                    f"Reducing to {data_length // (2 * min_samples_per_split)} splits"
-                )
-                n_splits = max(2, data_length // (2 * min_samples_per_split))
-            
-            # Calculate test size
-            test_size = data_length // (n_splits + 1)  # Ensure test size is proportional
-            
-            # Initialize TimeSeriesSplit
-            tscv = TimeSeriesSplit(
-                n_splits=n_splits,
-                test_size=test_size,
-                gap=0
-            )
-            
-            # Run walk-forward optimization
-            all_results = []
-            for train_index, test_index in tscv.split(self.data):
-                try:
-                    split_results = self._run_single_split(train_index, test_index, strategy)
-                    all_results.append(split_results)
-                except Exception as e:
-                    logger.error(f"Error in split: {e}")
-                    continue
-            
+
+            if data_length < min_samples:
+                raise ValueError(f"Insufficient data points: {data_length} < {min_samples}")
+
+            # Calculate optimal number of splits
+            min_train_size = 60  # Minimum training size
+            min_test_size = 20   # Minimum test size
+            max_splits = (data_length - min_train_size) // min_test_size
+
+            # Adjust n_splits if necessary
+            if n_splits > max_splits:
+                n_splits = max(1, max_splits)
+                logger.warning(f"Reducing number of splits to {n_splits} due to data constraints")
+
+            # Create splits manually if only one split
+            if n_splits == 1:
+                train_size = int(data_length * 0.7)  # 70% for training
+                all_results = [self._run_single_split(
+                    np.arange(train_size),
+                    np.arange(train_size, data_length),
+                    strategy
+                )]
+            else:
+                # Initialize TimeSeriesSplit
+                tscv = TimeSeriesSplit(n_splits=n_splits)
+
+                # Run parallel walk-forward optimization
+                with ThreadPoolExecutor(max_workers=n_jobs if n_jobs > 0 else None) as executor:
+                    futures = []
+                    for train_idx, test_idx in tscv.split(self.data):
+                        # Ensure minimum sizes
+                        if len(train_idx) < min_train_size or len(test_idx) < min_test_size:
+                            continue
+
+                        future = executor.submit(
+                            self._run_single_split,
+                            train_idx,
+                            test_idx,
+                            strategy
+                        )
+                        futures.append(future)
+
+                    # Collect results
+                    all_results = []
+                    for future in futures:
+                        try:
+                            result = future.result()
+                            if result is not None and not result.empty:
+                                all_results.append(result)
+                        except Exception as e:
+                            logger.error(f"Error in split execution: {e}")
+                            continue
+
             if not all_results:
                 raise ValueError("No valid results from any split")
-            
+
+            # Combine results
             self.results = pd.concat(all_results)
+
+            # Log completion
+            logger.info(f"Backtest completed with {len(self.results)} results")
+
             return self.results
-            
+
         except Exception as e:
             logger.error(f"Error running backtest: {e}")
             raise
@@ -211,29 +323,32 @@ class EnhancedBacktest:
             raise
 
     def _run_single_split(self, 
-                     train_index: np.ndarray, 
-                     test_index: np.ndarray,
-                     strategy: Any) -> pd.DataFrame:
+                         train_index: np.ndarray,
+                         test_index: np.ndarray,
+                         strategy: Any) -> pd.DataFrame:
         """
         Run backtest on a single train/test split.
         
         Args:
-            train_index: Indices for training data
-            test_index: Indices for testing data
-            strategy: Trading strategy object
+            train_index: Training data indices
+            test_index: Test data indices
+            strategy: Trading strategy
             
         Returns:
             DataFrame containing results for this split
+            
+        Raises:
+            ValueError: If split execution fails
         """
         try:
             # Get train/test data
             train_data = self.data.iloc[train_index]
             test_data = self.data.iloc[test_index]
             
-            # Ensure minimum data requirements
-            if len(train_data) < 50 or len(test_data) < 20:  # Example minimum requirements
+            # Validate split sizes
+            if len(train_data) < 50 or len(test_data) < 20:
                 raise ValueError(
-                    f"Insufficient data in split: train={len(train_data)}, test={len(test_data)}"
+                    f"Insufficient split sizes - Train: {len(train_data)}, Test: {len(test_data)}"
                 )
             
             # Train strategy
@@ -249,6 +364,7 @@ class EnhancedBacktest:
             returns = self.calculate_returns(test_data, signals)
             returns['Market_Condition'] = market_conditions
             
+            logger.debug(f"Split completed - Train size: {len(train_data)}, Test size: {len(test_data)}")
             return returns
             
         except Exception as e:
@@ -282,50 +398,40 @@ class EnhancedBacktest:
             logger.error(f"Error in single backtest: {e}")
             raise
 
-    def calculate_returns(self, data: pd.DataFrame, signals: pd.Series) -> pd.DataFrame:
-        """
-        Calculate returns and performance metrics for trades.
-        
-        Args:
-            data: Price data
-            signals: Trading signals
-            
-        Returns:
-            DataFrame containing calculated returns
-        """
+    def calculate_returns(self, data: pd.DataFrame, signals: pd.Series) -> Optional[pd.DataFrame]:
+        """Calculate returns for the backtest."""
         try:
             returns = pd.DataFrame(index=data.index)
             returns['Price'] = data['close']
             returns['Signal'] = signals
             returns['Returns'] = np.log(data['close'] / data['close'].shift(1))
             
-            # Calculate transaction costs
-            transaction_costs = (
-                abs(returns['Signal'].diff()) * 
-                (self.config.commission_rate + self.config.slippage)
-            )
+            # Handle first row
+            returns.loc[returns.index[0], 'Returns'] = 0
             
             # Calculate strategy returns
-            returns['Strategy_Returns'] = (
-                returns['Signal'].shift(1) * returns['Returns'] - 
-                transaction_costs
-            )
+            returns['Strategy_Returns'] = returns['Signal'].shift(1) * returns['Returns']
             
-            # Calculate cumulative returns and drawdown
-            returns['Cumulative_Returns'] = (
-                (1 + returns['Strategy_Returns']).cumprod()
-            )
-            returns['Drawdown'] = (
-                (returns['Cumulative_Returns'].cummax() - 
-                returns['Cumulative_Returns']) / 
-                returns['Cumulative_Returns'].cummax()
-            )
-
+            # Handle first row
+            returns.loc[returns.index[0], 'Strategy_Returns'] = 0
+            
+            # Calculate cumulative returns
+            returns['Cumulative_Returns'] = (1 + returns['Strategy_Returns']).cumprod()
+            
+            # Calculate drawdown
+            peak = returns['Cumulative_Returns'].expanding().max()
+            returns['Drawdown'] = (returns['Cumulative_Returns'] - peak) / peak
+            
+            # Validate results
+            if returns['Strategy_Returns'].isnull().all():
+                logger.warning("No valid strategy returns calculated")
+                return None
+                
             return returns
-
+            
         except Exception as e:
             logger.error(f"Error calculating returns: {e}")
-            raise
+            return None
 
     def _run_monte_carlo(self,
                         strategy: Any,
