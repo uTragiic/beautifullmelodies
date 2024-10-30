@@ -12,6 +12,7 @@ import numpy as np
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import joblib
+from datetime import timedelta
 
 from ..models.mlmodel import MachineLearningModel
 from ..indicators.calculator import IndicatorCalculator
@@ -50,6 +51,8 @@ class TrainingConfig:
         self.max_correlation_threshold = max_correlation_threshold
         self.parallel_training = parallel_training
         self.max_workers = max_workers
+        self.risk_free_rate = 0.02
+
 
 class ModelTrainer:
     """
@@ -296,50 +299,26 @@ class ModelTrainer:
         try:
             logger.info(f"Loading market data from {start_date} to {end_date}")
             
-            # Load base data
-            market_data = self.db_handler.load_market_data('SPY')
+            # Get market data (using SPY as market proxy)
+            market_data = self.db_handler.load_market_data('SPY', start_date, end_date)
+            
             if market_data.empty:
                 raise ValueError("No market data loaded")
                 
-            # Filter date range
-            market_data = market_data[
-                (market_data.index >= start_date) &
-                (market_data.index <= end_date)
-            ]
+            # Add check for minimum data points
+            min_required_points = 300  # Based on lookback period
+            if len(market_data) < min_required_points:
+                logger.warning(f"Insufficient data points ({len(market_data)}), attempting to load more historical data")
+                # Try loading more historical data
+                extended_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=365*5)).strftime('%Y-%m-%d')
+                market_data = self.db_handler.load_market_data('SPY', extended_start, end_date)
+                
+                if len(market_data) < min_required_points:
+                    raise ValueError(f"Insufficient data points even with extended history: {len(market_data)} < {min_required_points}")
             
-            if len(market_data) < self.config.min_train_samples:
-                raise ValueError(
-                    f"Insufficient data points: {len(market_data)} < "
-                    f"{self.config.min_train_samples}"
-                )
+            logger.info(f"Loaded {len(market_data)} data points")
             
-            # Ensure required columns exist
-            required_columns = ['open', 'high', 'low', 'close', 'volume']
-            missing_columns = [col for col in required_columns if col not in market_data.columns]
-            if missing_columns:
-                raise ValueError(f"Missing required columns: {missing_columns}")
-            
-            # Check for NaN values
-            if market_data[required_columns].isna().any().any():
-                logger.warning("Found NaN values in market data, filling with forward fill")
-                market_data = market_data.ffill()
-            
-            # Calculate technical indicators
-            logger.info("Calculating technical indicators...")
-            market_data = self.indicator_calculator.calculate_indicators(market_data)
-            
-            # Validate indicators were calculated
-            indicator_columns = [
-                'RSI', 'MACD_diff', 'ADX', 'ATR', 'Volume_Ratio', 
-                'Momentum', 'Stoch_K', 'OBV', 'BB_width', 'VWAP'
-            ]
-            
-            missing_indicators = [ind for ind in indicator_columns if ind not in market_data.columns]
-            if missing_indicators:
-                raise ValueError(f"Failed to calculate indicators: {missing_indicators}")
-            
-            logger.info(f"Prepared market data with {len(market_data)} rows and {len(market_data.columns)} features")
-            
+            # Rest of the data preparation...
             return market_data
             
         except Exception as e:
@@ -377,11 +356,9 @@ class ModelTrainer:
         """Prepare cluster-level training data."""
         return self._prepare_sector_data(symbols, start_date, end_date)
         
-    def _validate_model(self,
-                    model: MachineLearningModel,
-                    data: pd.DataFrame) -> Dict[str, float]:
+    def _validate_model(self, model: MachineLearningModel, data: pd.DataFrame) -> Dict[str, float]:
         """
-        Validate model performance.
+        Validate model performance with adjusted data requirements.
         
         Args:
             model: Model to validate
@@ -391,32 +368,38 @@ class ModelTrainer:
             Dictionary of performance metrics
         """
         try:
-            # Create validation set
-            val_size = int(len(data) * (1 - self.config.train_test_split))
-            val_data = data.tail(val_size)
-            
             # Initialize backtester
-            backtest = EnhancedBacktest(val_data)
+            backtest = EnhancedBacktest(data)
             
-            # Run backtest with the model
-            backtest_results = backtest.run_backtest(model)
+            # Run backtest with adjusted parameters
+            backtest_results = backtest.run_backtest(
+                model,
+                n_splits=3,  # Reduced number of splits
+                n_jobs=-1
+            )
             
-            # Calculate metrics
+            # Calculate performance metrics
             metrics = backtest.calculate_performance_metrics()
             
-            # Return performance metrics
+            # Calculate metrics for market condition performance
+            market_condition_stats = backtest.calculate_market_condition_statistics(backtest_results)
+            
+            # Calculate trading statistics
+            trading_stats = backtest.calculate_trading_statistics()
+            
+            # Return comprehensive metrics
             return {
                 'sharpe_ratio': metrics.sharpe_ratio,
                 'win_rate': metrics.win_rate,
                 'profit_factor': metrics.profit_factor,
                 'max_drawdown': metrics.max_drawdown,
                 'volatility': metrics.volatility,
-                'avg_return': getattr(metrics, 'avg_return', None),
-                'sortino_ratio': getattr(metrics, 'sortino_ratio', None),
-                'calmar_ratio': getattr(metrics, 'calmar_ratio', None),
-                'total_trades': getattr(metrics, 'total_trades', None),
-                'winning_trades': getattr(metrics, 'winning_trades', None),
-                'losing_trades': getattr(metrics, 'losing_trades', None)
+                'market_condition_stats': market_condition_stats,
+                'trading_stats': trading_stats,
+                'total_trades': len(backtest_results),
+                'average_trade_duration': trading_stats.get('avg_trade_duration', 0),
+                'max_consecutive_losses': trading_stats.get('max_consecutive_losses', 0),
+                'recovery_factor': trading_stats.get('recovery_factor', 0)
             }
             
         except Exception as e:

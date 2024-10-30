@@ -1,0 +1,83 @@
+{
+    "timestamp": "20241029_224556",
+    "market_regime": "normal",
+    "performance_comparison": {
+        "in_sample": {
+            "sharpe_ratio": 0.018589345198410687,
+            "win_rate": 0.553680981595092,
+            "profit_factor": 1.0692551621691866,
+            "max_drawdown": 0.22530957286484693,
+            "volatility": 0.1902339450212305,
+            "avg_return": null,
+            "sortino_ratio": null,
+            "calmar_ratio": null,
+            "total_trades": null,
+            "winning_trades": null,
+            "losing_trades": null
+        },
+        "out_sample": {
+            "sharpe_ratio": -0.06265418485502307,
+            "win_rate": 0.4849315068493151,
+            "profit_factor": 0.8725104042027158,
+            "max_drawdown": 0.28001213347268966,
+            "volatility": 0.12282459075237957,
+            "avg_return": null,
+            "sortino_ratio": null,
+            "calmar_ratio": null,
+            "total_trades": null,
+            "winning_trades": null,
+            "losing_trades": null
+        },
+        "degradation": {
+            "sharpe_ratio": 0.08124353005343375,
+            "win_rate": 0.06874947474577697,
+            "profit_factor": 0.19674475796647084,
+            "max_drawdown": 0.05470256060784273,
+            "volatility": 0.06740935426885093
+        }
+    },
+    "overfitting_analysis": {
+        "performance_score": 0.3810615858637521,
+        "stability_score": 0.0,
+        "regime_score": 0.0,
+        "complexity_score": 0.2533333333333333,
+        "final_score": 0.17775796767883417,
+        "threshold": 0.6
+    },
+    "regime_specific_thresholds": {
+        "performance": 0.3,
+        "stability": 0.4,
+        "regime": 0.5,
+        "complexity": 0.7,
+        "final": 0.6
+    },
+    "recommendations": [
+        "Significant performance degradation detected. Consider implementing more robust cross-validation techniques."
+    ],
+    "model_parameters": {
+        "n_features": 18,
+        "max_depth": 5,
+        "n_estimators": 100,
+        "min_samples_leaf": 20
+    },
+    "feature_importance": {
+        "SMA_50": 0.043236164919897895,
+        "SMA_200": 0.061021255555509385,
+        "RSI": 0.053267462873527044,
+        "RSI_Z": 0.06240110073084556,
+        "MACD": 0.037879954079228284,
+        "MACD_signal": 0.05593890379138748,
+        "MACD_diff": 0.058145809929784506,
+        "MACD_Z": 0.060750574162646405,
+        "ADX": 0.07347872072872277,
+        "ATR": 0.06351335996828548,
+        "Volume_Ratio": 0.06152045787091878,
+        "volume": 0.06221014883208936,
+        "OBV": 0.057915224844166745,
+        "VWAP": 0.05253158515607044,
+        "Momentum": 0.05376276289470117,
+        "Stoch_K": 0.04105659789137804,
+        "Stoch_D": 0.03474943466238187,
+        "BB_width": 0.0666204811084588
+    }
+}

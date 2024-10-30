@@ -38,18 +38,19 @@ class IndicatorCalculator:
             data: DataFrame with OHLCV data
             
         Returns:
-            DataFrame with all calculated indicators
+            DataFrame with calculated indicators
         """
         try:
             df = data.copy()
             
             # Moving Averages
-            df['SMA_50'] = df['close'].rolling(window=50).mean()
-            df['SMA_200'] = df['close'].rolling(window=200).mean()
+            df['SMA_50'] = SMAIndicator(close=df['close'], window=50).sma_indicator()
+            df['SMA_200'] = SMAIndicator(close=df['close'], window=200).sma_indicator()
             
             # RSI and normalized RSI
             rsi = RSIIndicator(close=df['close'], window=14)
             df['RSI'] = rsi.rsi()
+            # Calculate RSI Z-score over 50-day window
             df['RSI_Z'] = (df['RSI'] - df['RSI'].rolling(window=50).mean()) / df['RSI'].rolling(window=50).std()
             
             # MACD Components
@@ -62,31 +63,23 @@ class IndicatorCalculator:
             df['MACD'] = macd.macd()
             df['MACD_signal'] = macd.macd_signal()
             df['MACD_diff'] = macd.macd_diff()
+            # Calculate MACD Z-score over 50-day window
             df['MACD_Z'] = (df['MACD_diff'] - df['MACD_diff'].rolling(window=50).mean()) / df['MACD_diff'].rolling(window=50).std()
             
             # ADX
-            adx = ADXIndicator(
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                window=14
-            )
+            adx = ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14)
             df['ADX'] = adx.adx()
             
             # ATR
-            atr = AverageTrueRange(
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                window=14
-            )
+            atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14)
             df['ATR'] = atr.average_true_range()
             
+            # Volume indicators
+            df['Volume_SMA'] = df['volume'].rolling(window=20).mean()
+            df['Volume_Ratio'] = df['volume'] / df['Volume_SMA']
+            
             # On-Balance Volume
-            obv = OnBalanceVolumeIndicator(
-                close=df['close'],
-                volume=df['volume']
-            )
+            obv = OnBalanceVolumeIndicator(close=df['close'], volume=df['volume'])
             df['OBV'] = obv.on_balance_volume()
             
             # VWAP
@@ -110,18 +103,10 @@ class IndicatorCalculator:
             df['Stoch_D'] = stoch.stoch_signal()
             
             # Bollinger Bands
-            bb = BollingerBands(
-                close=df['close'],
-                window=20,
-                window_dev=2
-            )
+            bb = BollingerBands(close=df['close'], window=20, window_dev=2)
             df['BB_upper'] = bb.bollinger_hband()
             df['BB_lower'] = bb.bollinger_lband()
             df['BB_width'] = (df['BB_upper'] - df['BB_lower']) / df['close']
-            
-            # Volume Metrics
-            df['Volume_SMA'] = df['volume'].rolling(window=20).mean()
-            df['Volume_Ratio'] = df['volume'] / df['Volume_SMA']
             
             # Momentum
             df['Momentum'] = df['close'].pct_change(periods=20)
@@ -129,22 +114,31 @@ class IndicatorCalculator:
             # Forward fill any NaN values
             df = df.fillna(method='ffill')
             
-            # Check all required indicators are present
+            # Verify all required indicators are present
             required_indicators = [
-                'SMA_50', 'SMA_200', 'RSI', 'RSI_Z', 'MACD', 'MACD_signal', 
-                'MACD_diff', 'MACD_Z', 'ADX', 'ATR', 'OBV', 'VWAP', 'Stoch_K', 
-                'Stoch_D', 'BB_width', 'Volume_Ratio', 'Momentum'
+                'SMA_50', 'SMA_200', 
+                'RSI', 'RSI_Z', 
+                'MACD', 'MACD_signal', 'MACD_diff', 'MACD_Z',
+                'ADX', 'ATR', 
+                'Volume_Ratio', 
+                'OBV', 'VWAP',
+                'Momentum',
+                'Stoch_K', 'Stoch_D',
+                'BB_width'
             ]
             
             missing_indicators = [ind for ind in required_indicators if ind not in df.columns]
             if missing_indicators:
                 raise ValueError(f"Failed to calculate indicators: {missing_indicators}")
             
+            logger.info("Technical indicators calculated successfully")
             return df
             
         except Exception as e:
             logger.error(f"Error calculating indicators: {e}")
             raise
+
+        
     def _validate_data(self, data: pd.DataFrame) -> None:
         """Validate that the DataFrame has required columns."""
         required_columns = {'open', 'high', 'low', 'close', 'volume'}

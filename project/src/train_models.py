@@ -146,9 +146,9 @@ def train_models(config_path: str):
         # Training timeframes
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_dates = {
-            'market': (datetime.now() - timedelta(days=365*5)).strftime('%Y-%m-%d'),
-            'sector': (datetime.now() - timedelta(days=365*5)).strftime('%Y-%m-%d'),
-            'cluster': (datetime.now() - timedelta(days=365*5)).strftime('%Y-%m-%d')
+            'market': (datetime.now() - timedelta(days=365*10)).strftime('%Y-%m-%d'),
+            'sector': (datetime.now() - timedelta(days=365*10)).strftime('%Y-%m-%d'),
+            'cluster': (datetime.now() - timedelta(days=365*10)).strftime('%Y-%m-%d')
         }
         
         # Train market model

@@ -51,36 +51,25 @@ class EnhancedBacktest:
     def __init__(self, data: pd.DataFrame, initial_capital: float = 100000):
         """
         Initialize the backtesting system.
-
-        Args:
-            data: DataFrame containing market data
-            initial_capital: Initial trading capital
-
-        Raises:
-            ValueError: If input data is invalid
         """
         try:
             # Validate data
             if not isinstance(data, pd.DataFrame):
                 raise ValueError("Input data must be a pandas DataFrame")
-                
-            # Define required columns
+            
             required_columns = ['open', 'high', 'low', 'close', 'volume']
-            
-            # Convert column names to lowercase
             data.columns = data.columns.str.lower()
-            
-            # Check required columns
             missing_columns = [col for col in required_columns if col not in data.columns]
+            
             if missing_columns:
                 raise ValueError(f"Missing required columns: {missing_columns}")
-                
+            
             # Validate numeric data
             numeric_columns = ['open', 'high', 'low', 'close', 'volume']
             for col in numeric_columns:
                 if not pd.api.types.is_numeric_dtype(data[col]):
                     raise ValueError(f"Column {col} must contain numeric data")
-                    
+            
             # Validate index
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise ValueError("DataFrame must have DatetimeIndex")
@@ -108,21 +97,33 @@ class EnhancedBacktest:
             if not valid_prices:
                 raise ValueError("Invalid price relationships detected")
                 
-            # Check minimum data points
-            if len(data) < 100:  # Minimum required for backtesting
-                raise ValueError(f"Insufficient data points: {len(data)} < 100")
+            # Minimum data requirement reduced but still validate
+            if len(data) < 50:  # Reduced from previous requirement
+                raise ValueError(f"Insufficient data points: {len(data)} < 50")
 
-            # Calculate indicators and store data
-            self.data = self._calculate_indicators(data)
+            self.data = data
             self.initial_capital = initial_capital
             self.results = None
+            
+            # Use already calculated indicators if they exist, otherwise calculate them
+            required_indicators = [
+                'SMA_50', 'SMA_200', 'RSI', 'RSI_Z', 'MACD', 'MACD_signal',
+                'MACD_diff', 'MACD_Z', 'ADX', 'ATR', 'Volume_Ratio', 'OBV',
+                'VWAP', 'Momentum', 'Stoch_K', 'Stoch_D', 'BB_width'
+            ]
+            
+            missing_indicators = [ind for ind in required_indicators if ind not in data.columns]
+            if missing_indicators:
+                # If indicators are missing, calculate them
+                from ..indicators.calculator import IndicatorCalculator
+                calculator = IndicatorCalculator()
+                self.data = calculator.calculate_indicators(self.data)
             
             logger.info(f"Backtest initialized with {len(data)} data points")
             
         except Exception as e:
             logger.error(f"Error initializing backtest system: {e}")
             raise
-
 
     def _calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -214,53 +215,36 @@ class EnhancedBacktest:
     def run_backtest(self, strategy, n_splits: int = 5, n_jobs: int = -1) -> pd.DataFrame:
         """
         Run backtesting with walk-forward optimization.
-
+        
         Args:
             strategy: Trading strategy to test
             n_splits: Number of time series splits
             n_jobs: Number of parallel jobs
-
+            
         Returns:
             DataFrame containing backtest results
         """
         try:
-            # Ensure sufficient data
-            min_samples = 100  # Minimum required for reliable training
+            # Validate data length
             data_length = len(self.data)
-
-            if data_length < min_samples:
-                raise ValueError(f"Insufficient data points: {data_length} < {min_samples}")
-
-            # Calculate optimal number of splits
-            min_train_size = 60  # Minimum training size
-            min_test_size = 20   # Minimum test size
+            min_train_size = 50  # Reduced minimum training size
+            min_test_size = 20   # Reduced minimum test size
+            
+            # Calculate maximum splits
             max_splits = (data_length - min_train_size) // min_test_size
-
-            # Adjust n_splits if necessary
-            if n_splits > max_splits:
-                n_splits = max(1, max_splits)
-                logger.warning(f"Reducing number of splits to {n_splits} due to data constraints")
-
-            # Create splits manually if only one split
-            if n_splits == 1:
-                train_size = int(data_length * 0.7)  # 70% for training
-                all_results = [self._run_single_split(
-                    np.arange(train_size),
-                    np.arange(train_size, data_length),
-                    strategy
-                )]
-            else:
-                # Initialize TimeSeriesSplit
-                tscv = TimeSeriesSplit(n_splits=n_splits)
-
-                # Run parallel walk-forward optimization
-                with ThreadPoolExecutor(max_workers=n_jobs if n_jobs > 0 else None) as executor:
-                    futures = []
-                    for train_idx, test_idx in tscv.split(self.data):
-                        # Ensure minimum sizes
-                        if len(train_idx) < min_train_size or len(test_idx) < min_test_size:
-                            continue
-
+            n_splits = min(n_splits, max_splits)
+            
+            if n_splits < 1:
+                raise ValueError(f"Insufficient data for splitting: {data_length} points")
+                
+            # Initialize TimeSeriesSplit
+            tscv = TimeSeriesSplit(n_splits=n_splits, test_size=min_test_size)
+            
+            # Run parallel walk-forward optimization
+            with ThreadPoolExecutor(max_workers=n_jobs if n_jobs > 0 else None) as executor:
+                futures = []
+                for train_idx, test_idx in tscv.split(self.data):
+                    if len(train_idx) >= min_train_size and len(test_idx) >= min_test_size:
                         future = executor.submit(
                             self._run_single_split,
                             train_idx,
@@ -268,33 +252,29 @@ class EnhancedBacktest:
                             strategy
                         )
                         futures.append(future)
-
-                    # Collect results
-                    all_results = []
-                    for future in futures:
-                        try:
-                            result = future.result()
-                            if result is not None and not result.empty:
-                                all_results.append(result)
-                        except Exception as e:
-                            logger.error(f"Error in split execution: {e}")
-                            continue
-
-            if not all_results:
-                raise ValueError("No valid results from any split")
-
-            # Combine results
-            self.results = pd.concat(all_results)
-
-            # Log completion
-            logger.info(f"Backtest completed with {len(self.results)} results")
-
-            return self.results
-
+                        
+                # Collect results
+                all_results = []
+                for future in futures:
+                    try:
+                        result = future.result()
+                        if result is not None and not result.empty:
+                            all_results.append(result)
+                    except Exception as e:
+                        logger.error(f"Error in split execution: {e}")
+                        continue
+                        
+                if not all_results:
+                    raise ValueError("No valid results from any split")
+                    
+                # Combine results
+                self.results = pd.concat(all_results)
+                return self.results
+                
         except Exception as e:
             logger.error(f"Error running backtest: {e}")
             raise
-
+    
     def _run_walk_forward(self, strategy: Any) -> pd.DataFrame:
         """
         Perform walk-forward optimization.
@@ -323,9 +303,9 @@ class EnhancedBacktest:
             raise
 
     def _run_single_split(self, 
-                         train_index: np.ndarray,
-                         test_index: np.ndarray,
-                         strategy: Any) -> pd.DataFrame:
+                        train_index: np.ndarray,
+                        test_index: np.ndarray,
+                        strategy: Any) -> pd.DataFrame:
         """
         Run backtest on a single train/test split.
         
@@ -336,9 +316,6 @@ class EnhancedBacktest:
             
         Returns:
             DataFrame containing results for this split
-            
-        Raises:
-            ValueError: If split execution fails
         """
         try:
             # Get train/test data
@@ -362,11 +339,14 @@ class EnhancedBacktest:
             
             # Calculate returns
             returns = self.calculate_returns(test_data, signals)
-            returns['Market_Condition'] = market_conditions
             
-            logger.debug(f"Split completed - Train size: {len(train_data)}, Test size: {len(test_data)}")
-            return returns
-            
+            if returns is not None:
+                returns['Market_Condition'] = market_conditions
+                logger.debug(f"Split completed - Train size: {len(train_data)}, Test size: {len(test_data)}")
+                return returns
+            else:
+                raise ValueError("No valid returns calculated")
+                
         except Exception as e:
             logger.error(f"Error in single split: {e}")
             raise
