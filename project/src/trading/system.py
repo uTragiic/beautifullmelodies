@@ -26,7 +26,7 @@ from ..risk.manager import RiskManagement
 from ..risk.positionsizing import PositionSizing
 from ..risk.tpsl import TakeProfitStopLoss
 from ..signal.generator import SignalGenerator
-from ..backtesting.enhancedbacktest import EnhancedBacktest
+from ..backtesting.enhancedbacktest import Backtest
 from .order import Order, OrderStatus, OrderType, Position, Portfolio
 from ..risk.exposure import ExposureTracker
 from ..signal.quality import SignalQualityMonitor

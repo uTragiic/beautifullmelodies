@@ -135,7 +135,7 @@ class DatabaseSetup:
 
                 # Check if the latest volume and price meet criteria
                 latest = df.iloc[-1]
-                if (latest['Volume'] > 50000 and latest['Close'] > 0.1):
+                if (latest['Volume'] > 50000 and latest['close'] > 0.1):
                     valid_symbols.append(symbol)
                 else:
                     logger.info(f"Symbol {symbol} does not meet volume or price criteria.")

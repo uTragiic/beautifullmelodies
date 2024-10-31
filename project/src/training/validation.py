@@ -10,7 +10,7 @@ import pandas as pd
 from datetime import datetime
 
 from ..models.overfittingcontrol import OverfittingController
-from ..backtesting.enhancedbacktest import EnhancedBacktest
+from ..backtesting.enhancedbacktest import Backtest
 from ..core.performance_metrics import PerformanceMetrics
 from ..analysis.marketcondition import MarketConditionAnalyzer
 from ..core.types import MarketRegime
@@ -95,7 +95,7 @@ class ModelValidator:
         """
         try:
             # Initialize backtester with validation data
-            backtester = EnhancedBacktest(validation_data)
+            backtester = Backtest(validation_data)
             
             # Get in-sample and out-of-sample metrics
             in_sample_metrics, out_sample_metrics = self._get_performance_metrics(
@@ -164,7 +164,7 @@ class ModelValidator:
             raise
                 
     def _get_performance_metrics(self,
-                                 backtester: EnhancedBacktest,
+                                 backtester: Backtest,
                                  model: Any) -> Tuple[PerformanceMetrics, PerformanceMetrics]:
         """Get in-sample and out-of-sample performance metrics."""
         # Run backtest with walk-forward optimization
@@ -226,7 +226,7 @@ class ModelValidator:
                 continue
                 
             # Initialize backtester for regime data
-            regime_backtester = EnhancedBacktest(regime_data)
+            regime_backtester = Backtest(regime_data)
             results = regime_backtester.run_backtest(model)
             regime_metrics = regime_backtester.calculate_performance_metrics(results)
             

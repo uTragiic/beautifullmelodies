@@ -1,0 +1,97 @@
+{
+    "timestamp": "20241030_001200",
+    "market_regime": "normal",
+    "performance_comparison": {
+        "in_sample": {
+            "sharpe_ratio": -0.012173270358773445,
+            "win_rate": 0.5397058823529411,
+            "profit_factor": 0.9855239834672842,
+            "max_drawdown": 0.29626979732733566,
+            "volatility": 0.18819228440443508,
+            "avg_return": null,
+            "sortino_ratio": null,
+            "calmar_ratio": null,
+            "total_trades": null,
+            "winning_trades": null,
+            "losing_trades": null
+        },
+        "out_sample": {
+            "sharpe_ratio": -0.13697086172266984,
+            "win_rate": 0.44562334217506633,
+            "profit_factor": 0.7198171313670287,
+            "max_drawdown": 0.3658226941546911,
+            "volatility": 0.12053758920106536,
+            "avg_return": null,
+            "sortino_ratio": null,
+            "calmar_ratio": null,
+            "total_trades": null,
+            "winning_trades": null,
+            "losing_trades": null
+        },
+        "degradation": {
+            "sharpe_ratio": 0.1247975913638964,
+            "win_rate": 0.09408254017787482,
+            "profit_factor": 0.26570685210025546,
+            "max_drawdown": 0.06955289682735544,
+            "volatility": 0.06765469520336972
+        }
+    },
+    "overfitting_analysis": {
+        "performance_score": 0.40763826637093103,
+        "stability_score": 0.0,
+        "regime_score": 0.0,
+        "complexity_score": 0.43,
+        "final_score": 0.20605530654837242,
+        "threshold": 0.6
+    },
+    "regime_specific_thresholds": {
+        "performance": 0.3,
+        "stability": 0.4,
+        "regime": 0.5,
+        "complexity": 0.7,
+        "final": 0.6
+    },
+    "recommendations": [
+        "Significant performance degradation detected. Consider implementing more robust cross-validation techniques."
+    ],
+    "model_parameters": {
+        "bootstrap": true,
+        "ccp_alpha": 0.0,
+        "class_weight": null,
+        "criterion": "gini",
+        "max_depth": 5,
+        "max_features": "sqrt",
+        "max_leaf_nodes": null,
+        "max_samples": null,
+        "min_impurity_decrease": 0.0,
+        "min_samples_leaf": 20,
+        "min_samples_split": 2,
+        "min_weight_fraction_leaf": 0.0,
+        "n_estimators": 100,
+        "n_jobs": null,
+        "oob_score": false,
+        "random_state": 42,
+        "verbose": 0,
+        "warm_start": false
+    },
+    "feature_importance": {
+        "SMA_50": 0.03802121850993895,
+        "SMA_200": 0.06971833186055096,
+        "RSI": 0.04635113384053734,
+        "RSI_Z": 0.05561882021541447,
+        "MACD": 0.04504439484097965,
+        "MACD_signal": 0.051134537715017546,
+        "MACD_diff": 0.05918448568358057,
+        "MACD_Z": 0.050021176139766976,
+        "ADX": 0.083866809407474,
+        "ATR": 0.05276685499841665,
+        "Volume_Ratio": 0.06122827768357955,
+        "volume": 0.06085808311817805,
+        "OBV": 0.05919593152634506,
+        "VWAP": 0.054265859923,
+        "Momentum": 0.06734316259610984,
+        "Stoch_K": 0.05089912979186634,
+        "Stoch_D": 0.040701022837782784,
+        "BB_width": 0.0537807693114614
+    }
+}

@@ -19,7 +19,7 @@ from ..indicators.calculator import IndicatorCalculator
 from ..analysis.marketcondition import MarketConditionAnalyzer
 from ..core.database_handler import DatabaseHandler
 from ..universe import UniverseManager, UniverseClusterer
-from ..backtesting.enhancedbacktest import EnhancedBacktest
+from ..backtesting.enhancedbacktest import Backtest
 from ..utils.validation import validate_dataframe
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class TrainingConfig:
     """Configuration for model training."""
     def __init__(self,
-                 base_lookback: int = 300,
+                 base_lookback: int = 100,
                  train_test_split: float = 0.7,
                  n_validation_splits: int = 5,
                  min_train_samples: int = 252,
@@ -306,7 +306,7 @@ class ModelTrainer:
                 raise ValueError("No market data loaded")
                 
             # Add check for minimum data points
-            min_required_points = 300  # Based on lookback period
+            min_required_points = 100  # Based on lookback period
             if len(market_data) < min_required_points:
                 logger.warning(f"Insufficient data points ({len(market_data)}), attempting to load more historical data")
                 # Try loading more historical data
@@ -369,7 +369,7 @@ class ModelTrainer:
         """
         try:
             # Initialize backtester
-            backtest = EnhancedBacktest(data)
+            backtest = Backtest(data)
             
             # Run backtest with adjusted parameters
             backtest_results = backtest.run_backtest(

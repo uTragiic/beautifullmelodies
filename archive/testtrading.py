@@ -82,9 +82,9 @@ class EnhancedBacktest:
 
     def calculate_returns(self, data: pd.DataFrame, signals: pd.Series) -> pd.DataFrame:
         returns = pd.DataFrame(index=data.index)
-        returns['Price'] = data['Close']
+        returns['Price'] = data['close']
         returns['Signal'] = signals
-        returns['Returns'] = np.log(data['Close'] / data['Close'].shift(1))
+        returns['Returns'] = np.log(data['close'] / data['close'].shift(1))
         returns['Strategy_Returns'] = returns['Signal'].shift(1) * returns['Returns']
         returns['Cumulative_Returns'] = (1 + returns['Strategy_Returns']).cumprod()
         returns['Drawdown'] = (returns['Cumulative_Returns'].cummax() - returns['Cumulative_Returns']) / returns['Cumulative_Returns'].cummax()
@@ -92,11 +92,11 @@ class EnhancedBacktest:
 
     def classify_market_conditions(self, data: pd.DataFrame) -> pd.Series:
         # Calculate necessary indicators
-        data['SMA50'] = data['Close'].rolling(window=50).mean()
-        data['SMA200'] = data['Close'].rolling(window=200).mean()
+        data['SMA50'] = data['close'].rolling(window=50).mean()
+        data['SMA200'] = data['close'].rolling(window=200).mean()
         data['Volatility'] = data['Returns'].rolling(window=20).std() * np.sqrt(252)
         data['Volume_MA'] = data['Volume'].rolling(window=20).mean()
-        data['Momentum'] = data['Close'].pct_change(periods=20)
+        data['Momentum'] = data['close'].pct_change(periods=20)
 
         conditions = []
         for i in range(len(data)):
@@ -190,7 +190,7 @@ class EnhancedBacktest:
         return min(max(confidence_score, 0), 1)  # Ensure the score is between 0 and 1
 
     def generate_synthetic_data(self, days: int = 252) -> pd.DataFrame:
-        returns = self.data['Close'].pct_change().dropna()
+        returns = self.data['close'].pct_change().dropna()
         
         # Fit GARCH model
         model = arch_model(returns, vol='Garch', p=1, q=1, dist='t')
@@ -200,13 +200,13 @@ class EnhancedBacktest:
         sim_returns = results.forecast(horizon=days, method='simulation').simulations.values[-1, :]
         
         # Generate prices from returns
-        last_price = self.data['Close'].iloc[-1]
+        last_price = self.data['close'].iloc[-1]
         sim_prices = last_price * np.exp(np.cumsum(sim_returns))
         
         dates = pd.date_range(start=self.data.index[-1] + pd.Timedelta(days=1), periods=days)
         
         synthetic_data = pd.DataFrame({
-            'Close': sim_prices,
+            'close': sim_prices,
             'Open': sim_prices * np.random.uniform(0.99, 1.01, days),
             'High': sim_prices * np.random.uniform(1.001, 1.02, days),
             'Low': sim_prices * np.random.uniform(0.98, 0.999, days),
@@ -462,7 +462,7 @@ class ParameterAdjuster:
             raise Exception("Failed to fetch live data and no valid backup exists") from e
 
 class MachineLearningModel:
-    def __init__(self, lookback_period: int = 300):
+    def __init__(self, lookback_period: int = 100):
         self.lookback_period = lookback_period
         self.scaler = StandardScaler()
         self.model = RandomForestClassifier(
@@ -2376,7 +2376,7 @@ class TradingSystem:
     def update_trade(self, trade: Dict[str, float], current_price: float) -> Tuple[Dict[str, float], float]:
         if (trade['signal'] > 0 and current_price <= trade['stop_loss']) or \
            (trade['signal'] < 0 and current_price >= trade['stop_loss']):
-            # Close the trade
+            # close the trade
             profit_loss = (current_price - trade['entry_price']) * trade['position_size'] * trade['signal']
             self.account_balance += (trade['position_size'] * current_price)
             return None, profit_loss

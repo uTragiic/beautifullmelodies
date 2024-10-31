@@ -19,6 +19,7 @@ from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.volatility import AverageTrueRange, BollingerBands
 from ta.volume import OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.utils.validation import check_is_fitted
 
 # Local Imports
 from ..core.types import MarketRegime
@@ -34,7 +35,7 @@ class MachineLearningModel:
     Machine learning model for market prediction with overfitting protection.
     """
     
-    def __init__(self, lookback_period: int = 300):
+    def __init__(self, lookback_period: int = 100):
         """
         Initialize the machine learning model with parameters from Durandal Trading Strategy Document.
 
@@ -44,11 +45,29 @@ class MachineLearningModel:
         self.lookback_period = lookback_period
         self.scaler = StandardScaler()
         self.risk_free_rate = 0.02
+        model: Optional[RandomForestClassifier] = None,
+        pipeline: Optional[Pipeline] = None
+
         # Initialize preprocessing pipeline
-        self.pipeline = Pipeline([
-            ('imputer', SimpleImputer(strategy='mean')),
-            ('scaler', StandardScaler())
-        ])
+    # Initialize or assign the model
+        if model is not None:
+            self.model = model
+        else:
+            self.model = RandomForestClassifier(
+                n_estimators=100,
+                max_depth=5,
+                min_samples_leaf=20,
+                random_state=42
+            )
+
+        # Initialize or assign the pipeline
+        if pipeline is not None:
+            self.pipeline = pipeline
+        else:
+            self.pipeline = Pipeline([
+                ('imputer', SimpleImputer(strategy='mean')),
+                ('scaler', StandardScaler())
+            ])
 
         # Initialize model with document-specified parameters
         self.model = RandomForestClassifier(
@@ -136,6 +155,22 @@ class MachineLearningModel:
             'bear': 0.3,  # Base bearish signal threshold
         }
 
+    def _is_pipeline_fitted(self) -> bool:
+        """
+        Check if the pipeline has been fitted.
+
+        Returns:
+            True if the pipeline is fitted, False otherwise.
+        """
+        try:
+            # Check if each step in the pipeline is fitted
+            for name, estimator in self.pipeline.named_steps.items():
+                check_is_fitted(estimator)
+            return True
+        except Exception as e:
+            logger.error(f"Pipeline not fitted: {str(e)}")
+            return False
+
     def _adjust_thresholds(self, 
                         base_thresholds: Dict[str, float],
                         market_condition: str,
@@ -211,6 +246,8 @@ class MachineLearningModel:
             valid_mask = ~(X.isna().any(axis=1) | pd.isna(y))
             X = X[valid_mask]
             y = y[valid_mask]
+            X = X.loc[:, X.apply(pd.Series.nunique) != 1]
+            self.feature_columns = X.columns.tolist()
             
             # Ensure sufficient data remains after cleaning
             if len(X) < 100:  # Minimum required samples
@@ -502,6 +539,10 @@ class MachineLearningModel:
             X, _ = self.prepare_features(data)
             if len(X) == 0:
                 raise ValueError("No valid features after preparation")
+            
+            # Check if the pipeline is fitted
+            if not self._is_pipeline_fitted():
+                raise ValueError("Pipeline is not fitted. Cannot transform data.")
                 
             # Use the fitted pipeline to transform the data
             X_transformed = self.pipeline.transform(X[-1].reshape(1, -1))
@@ -512,6 +553,7 @@ class MachineLearningModel:
             logger.error(f"Error in prediction: {e}")
             raise
 
+
     def update(self, new_data: pd.DataFrame, market_regime: str) -> None:
         """
         Update the model with new data.
@@ -521,42 +563,48 @@ class MachineLearningModel:
             market_regime: Current market regime
         """
         try:
-                self.current_market_regime = market_regime
+            self.current_market_regime = market_regime
 
-                # Calculate indicators using IndicatorCalculator
-                new_data = self.indicator_calculator.calculate_indicators(new_data)
+            # Calculate indicators using IndicatorCalculator
+            new_data = self.indicator_calculator.calculate_indicators(new_data)
 
-                X_new, y_new = self.prepare_features(new_data)
+            X_new, y_new = self.prepare_features(new_data)
 
-                if len(X_new) == 0:
-                    raise ValueError("No valid data for update")
+            if len(X_new) == 0:
+                raise ValueError("No valid data for update")
 
+            # Check if the pipeline is fitted
+            if not self._is_pipeline_fitted():
+                logger.info("Pipeline not fitted. Fitting pipeline with new data...")
+                # Fit the pipeline with new data
+                X_new = self.pipeline.fit_transform(X_new)
+            else:
                 # Transform new data using the fitted pipeline
-                X_transformed = self.pipeline.transform(X_new)
+                X_new = self.pipeline.transform(X_new)
 
-                # Get current predictions
-                predictions = self.model.predict_proba(X_transformed)[:, 1]
-                returns = new_data['close'].pct_change().dropna().values
+            # Get current predictions
+            predictions = self.model.predict_proba(X_new)[:, 1]
+            returns = new_data['close'].pct_change().dropna().values
 
-                # Ensure alignment of returns and predictions
-                returns = returns[-len(predictions):]
+            # Ensure alignment of returns and predictions
+            returns = returns[-len(predictions):]
 
-                # Calculate performance metrics
-                performance_metrics = self._calculate_performance_metrics(
-                    predictions, y_new, returns
-                )
+            # Calculate performance metrics
+            performance_metrics = self._calculate_performance_metrics(
+                predictions, y_new, returns
+            )
 
-                # Store performance history
-                self.performance_history.append(performance_metrics)
+            # Store performance history
+            self.performance_history.append(performance_metrics)
 
-                # Update the model with new data
-                self.model.fit(X_transformed, y_new)
+            # Update the model with new data
+            self.model.fit(X_new, y_new)
 
-                logger.info("Model successfully updated with new data")
+            logger.info("Model successfully updated with new data")
 
         except Exception as e:
-                logger.error(f"Error updating model: {e}")
-                raise
+            logger.error(f"Error updating model: {e}")
+            raise
 
     def get_feature_importance(self) -> Dict[str, float]:
         """Get feature importance scores."""
@@ -621,10 +669,7 @@ class MachineLearningModel:
             model_state = joblib.load(f"{path}_model.joblib")
             
             self.model = model_state['model']
-            self.pipeline = Pipeline([
-                ('imputer', SimpleImputer(strategy='mean')),
-                ('scaler', StandardScaler())
-            ])
+            self.pipeline = model_state['pipeline']  # Load the fitted pipeline
             self.feature_columns = model_state['feature_columns']
             self.lookback_period = model_state['lookback_period']
             self.current_market_regime = model_state['current_market_regime']

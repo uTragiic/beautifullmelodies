@@ -12,14 +12,20 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score
 import joblib
+from ta.trend import EMAIndicator, MACD, ADXIndicator, SMAIndicator
+from ta.momentum import RSIIndicator, StochasticOscillator
+from ta.volatility import AverageTrueRange, BollingerBands
+from ta.volume import OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.utils.validation import check_is_fitted
 
 # Local Imports
-# Adjust the import paths according to your project structure
+from ..core.types import MarketRegime
+from ..core.performance_metrics import PerformanceMetrics
 from .overfittingcontrol import OverfittingController
 from ..indicators.calculator import IndicatorCalculator
-from ..core.performance_metrics import PerformanceMetrics
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -28,111 +34,127 @@ class MachineLearningModel:
     """
     Machine learning model for market prediction with overfitting protection.
     """
-    def __init__(
-        self,
-        lookback_period: int = 300,
-        model: Optional[RandomForestClassifier] = None,
-        pipeline: Optional[Pipeline] = None
-    ):
+    
+    def __init__(self, lookback_period: int = 100):
         """
-        Initialize the machine learning model with parameters.
+        Initialize the machine learning model with parameters from Durandal Trading Strategy Document.
 
         Args:
-            lookback_period: Number of periods for historical analysis.
-            model: Optional pre-trained model.
-            pipeline: Optional pre-fitted pipeline.
+            lookback_period: Number of periods for historical analysis
         """
-        try:
-            self.lookback_period = lookback_period
-            self.risk_free_rate = 0.02
+        self.lookback_period = lookback_period
+        self.scaler = StandardScaler()
+        self.risk_free_rate = 0.02
+        model: Optional[RandomForestClassifier] = None,
+        pipeline: Optional[Pipeline] = None
 
-            # Use the provided model or initialize a new one
-            if model is not None:
-                self.model = model
-            else:
-                self.model = RandomForestClassifier(
-                    n_estimators=100,
-                    max_depth=5,
-                    min_samples_leaf=20,
-                    random_state=42
-                )
-
-            # Use the provided pipeline or initialize a new one
-            if pipeline is not None:
-                self.pipeline = pipeline
-            else:
-                self.pipeline = Pipeline([
-                    ('imputer', SimpleImputer(strategy='mean')),
-                    ('scaler', StandardScaler())
-                ])
-
-            # Feature columns
-            self.feature_columns = [
-                'SMA_50', 'SMA_200',
-                'RSI', 'RSI_Z',
-                'MACD', 'MACD_signal', 'MACD_diff', 'MACD_Z',
-                'ADX', 'ATR',
-                'Volume_Ratio', 'volume',
-                'OBV', 'VWAP',
-                'Momentum',
-                'Stoch_K', 'Stoch_D',
-                'BB_width'
-            ]
-
-            # Initialize overfitting controller
-            self.overfitting_controller = OverfittingController(
-                base_lookback_period=252,
-                min_samples=100,
-                max_complexity_score=0.8,
-                parameter_stability_threshold=0.3
+        # Initialize preprocessing pipeline
+    # Initialize or assign the model
+        if model is not None:
+            self.model = model
+        else:
+            self.model = RandomForestClassifier(
+                n_estimators=100,
+                max_depth=5,
+                min_samples_leaf=20,
+                random_state=42
             )
 
-            # Market condition parameters
-            self.market_params = {
-                'trend_threshold': 0.02,
-                'volatility_percentile': 0.8,
-                'volume_threshold': 1.5,
-                'atr_window': 14,
-                'momentum_window': 20
-            }
+        # Initialize or assign the pipeline
+        if pipeline is not None:
+            self.pipeline = pipeline
+        else:
+            self.pipeline = Pipeline([
+                ('imputer', SimpleImputer(strategy='mean')),
+                ('scaler', StandardScaler())
+            ])
 
-            # Signal generation thresholds
-            self.signal_thresholds = {
-                'base_bull': 0.7,
-                'base_bear': 0.3,
-                'alpha': 0.1,
-                'beta': 0.3,
-                'min_adx': 25,
-                'rsi_overbought': 70,
-                'rsi_oversold': 30
-            }
+        # Initialize model with document-specified parameters
+        self.model = RandomForestClassifier(
+            n_estimators=100,  # Can be tuned during validation
+            max_depth=5,       # Prevents overfitting
+            min_samples_leaf=20,  # Ensures stable splits
+            random_state=42
+        )
 
-            # Performance tracking
-            self.current_market_regime = "normal"
-            self.performance_history = []
+        # Feature columns from document section 2.1
+        self.feature_columns = [
+            # Moving Averages
+            'SMA_50', 'SMA_200',
+            
+            # RSI Components
+            'RSI', 'RSI_Z',
+            
+            # MACD Components
+            'MACD', 'MACD_signal', 'MACD_diff', 'MACD_Z',
+            
+            # Trend and Volatility
+            'ADX', 'ATR',
+            
+            # Volume Indicators
+            'Volume_Ratio', 'volume',
+            'OBV', 'VWAP',
+            
+            # Momentum and Oscillators
+            'Momentum',
+            'Stoch_K', 'Stoch_D',
+            'BB_width'
+        ]
 
-            # Tracking windows
-            self.tracking_windows = {
-                'short_term': 20,
-                'medium_term': 60,
-                'long_term': 252
-            }
+        # Initialize overfitting controller from document
+        self.overfitting_controller = OverfittingController(
+            base_lookback_period=252,  # One year of trading data
+            min_samples=100,           # Minimum samples for reliable statistics
+            max_complexity_score=0.8,  # Prevents excessive model complexity
+            parameter_stability_threshold=0.3  # Maximum allowed parameter instability
+        )
 
-            # Store indicators for threshold adjustments
-            self.indicator_thresholds = {}
+        # Market condition parameters from document section 2.2
+        self.market_params = {
+            'trend_threshold': 0.02,        # For sideways market detection
+            'volatility_percentile': 0.8,   # 80th percentile for high volatility
+            'volume_threshold': 1.5,        # 50% above average for high volume
+            'atr_window': 14,              # For volatility calculation
+            'momentum_window': 20          # For momentum calculation
+        }
 
-            # Initialize IndicatorCalculator
-            self.indicator_calculator = IndicatorCalculator()
+        # Signal generation thresholds from document
+        self.signal_thresholds = {
+            'base_bull': 0.7,
+            'base_bear': 0.3,
+            'alpha': 0.1,  # Bullish threshold reduction factor
+            'beta': 0.3,   # Bearish threshold increase factor
+            'min_adx': 25,  # Minimum ADX for trend confirmation
+            'rsi_overbought': 70,
+            'rsi_oversold': 30
+        }
 
-            # Initialize variables to store training data (for updates)
-            self.X_train = None
-            self.y_train = None
+        # Performance tracking
+        self.current_market_regime = "normal"
+        self.performance_history = []
+        
+        # Tracking windows from document
+        self.tracking_windows = {
+            'short_term': 20,   # 20-day window for recent performance
+            'medium_term': 60,  # 60-day window for medium-term trends
+            'long_term': 252    # 252-day window for long-term analysis
+        }
 
-            logger.info("MachineLearningModel initialized successfully")
+        # Store indicators for threshold adjustments
+        self.indicator_thresholds = {}  # Will be updated during training
 
-        except Exception as e:
-            logger.error(f"Error initializing MachineLearningModel: {str(e)}")
-            raise
+        # Initialize IndicatorCalculator
+        self.indicator_calculator = IndicatorCalculator()
+        
+        logger.info("MachineLearningModel initialized with Durandal Trading Strategy parameters")
+
+    def _get_base_thresholds(self) -> Dict[str, float]:
+        """Get base signal thresholds."""
+        return {
+            'bull': 0.7,  # Base bullish signal threshold
+            'bear': 0.3,  # Base bearish signal threshold
+        }
+
     def _is_pipeline_fitted(self) -> bool:
         """
         Check if the pipeline has been fitted.
@@ -141,718 +163,218 @@ class MachineLearningModel:
             True if the pipeline is fitted, False otherwise.
         """
         try:
-            # Check if the scaler in the pipeline has the 'scale_' attribute
-            return hasattr(self.pipeline.named_steps['scaler'], 'scale_')
-        except Exception:
+            # Check if each step in the pipeline is fitted
+            for name, estimator in self.pipeline.named_steps.items():
+                check_is_fitted(estimator)
+            return True
+        except Exception as e:
+            logger.error(f"Pipeline not fitted: {str(e)}")
             return False
 
-    def _validate_data(self, data: pd.DataFrame) -> None:
+    def _adjust_thresholds(self, 
+                        base_thresholds: Dict[str, float],
+                        market_condition: str,
+                        data: pd.DataFrame) -> Dict[str, float]:
         """
-        Validate input data structure and contents.
-
-        Args:
-            data: Input DataFrame to validate
-
-        Raises:
-            ValueError: If data validation fails
+        Adjust thresholds based on market conditions as per document section on
+        Market Condition Adjustments.
         """
-        try:
-            if not isinstance(data, pd.DataFrame):
-                raise ValueError("Input must be a pandas DataFrame")
+        adjusted = base_thresholds.copy()
+        
+        # Alpha and beta from document
+        alpha = 0.1  # Factor for bullish threshold reduction
+        beta = 0.3   # Factor for bearish threshold increase
+        
+        if "Uptrend" in market_condition:
+            # T_bull_up = T_bull_base × (1 - α)
+            adjusted['bull'] *= (1 - alpha)
+            # T_bear_up = T_bear_base × (1 + β)
+            adjusted['bear'] *= (1 + beta)
+            
+        elif "Downtrend" in market_condition:
+            # T_bull_down = T_bull_base × (1 + β)
+            adjusted['bull'] *= (1 + beta)
+            # T_bear_down = T_bear_base × (1 - α)
+            adjusted['bear'] *= (1 - alpha)
+            
+        # Trend strength adjustment
+        trend_factor = self._calculate_trend_strength(data)
+        if "Strong" in market_condition:
+            for key in adjusted:
+                adjusted[key] *= (1 + trend_factor * 0.2)
+                
+        return adjusted
 
-            required_columns = {'open', 'high', 'low', 'close', 'volume'}
-            missing_columns = required_columns - set(data.columns)
+    def _calculate_trend_strength(self, data: pd.DataFrame) -> float:
+        """Calculate trend strength as per document."""
+        sma_diff = (data['SMA_50'].iloc[-1] - data['SMA_200'].iloc[-1]) / data['SMA_200'].iloc[-1]
+        return abs(sma_diff)
 
-            if missing_columns:
-                raise ValueError(f"Missing required columns: {missing_columns}")
-
-            if data.empty:
-                raise ValueError("DataFrame is empty")
-
-            if data.isnull().any().any():
-                logger.warning("DataFrame contains NaN values")
-
-        except Exception as e:
-            logger.error(f"Data validation error: {str(e)}")
-            raise
     def prepare_features(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         """
         Prepare features and target for model training with enhanced validation.
-
+        
         Args:
-            data: DataFrame with market data
-
+            data: DataFrame with market data and indicators
+            
         Returns:
             Tuple of (features, target)
-
+            
         Raises:
             ValueError: If data preparation fails
         """
         try:
             # Validate input data
-            self._validate_data(data)
-
             if len(data) < self.lookback_period:
                 raise ValueError(
                     f"Insufficient data points: {len(data)} < {self.lookback_period}"
                 )
-
+            
             # Verify all feature columns exist
             missing_features = [col for col in self.feature_columns if col not in data.columns]
             if missing_features:
-                logger.warning(f"Missing features: {missing_features}")
-                # Calculate missing indicators if possible
-                data = self.indicator_calculator.calculate_indicators(data)
-
-                # Recheck for missing features
-                missing_features = [col for col in self.feature_columns if col not in data.columns]
-                if missing_features:
-                    raise ValueError(f"Could not calculate required features: {missing_features}")
-
+                raise ValueError(f"Missing required features: {missing_features}")
+                
             # Extract features
             X = data[self.feature_columns].copy()
-
+            
             # Calculate future returns for target
             future_returns = data['close'].pct_change().shift(-1)
             y = np.where(future_returns > 0, 1, 0)
-
+            
             # Remove any rows with NaN values
             valid_mask = ~(X.isna().any(axis=1) | pd.isna(y))
             X = X[valid_mask]
             y = y[valid_mask]
-
+            X = X.loc[:, X.apply(pd.Series.nunique) != 1]
+            self.feature_columns = X.columns.tolist()
+            
             # Ensure sufficient data remains after cleaning
             if len(X) < 100:  # Minimum required samples
                 raise ValueError(
                     f"Insufficient valid samples after cleaning: {len(X)} < 100"
                 )
-
+                
             # Convert to numpy arrays
-            try:
-                X = X.values
-                y = np.array(y)
-                y = y[:len(X)]  # Align target with features
-            except Exception as e:
-                logger.error(f"Error converting to numpy arrays: {str(e)}")
-                raise ValueError("Error converting data to numpy arrays")
-
+            X = X.values
+            y = y[:(len(X))]  # Align target with features
+            
             # Add additional validation
             if X.shape[0] != y.shape[0]:
                 raise ValueError(
                     f"Feature/target shape mismatch: {X.shape[0]} != {y.shape[0]}"
                 )
-
+                
             if np.isnan(X).any() or np.isnan(y).any():
                 raise ValueError("NaN values found after preparation")
-
+                
             logger.info(
                 f"Prepared {X.shape[0]} samples with {X.shape[1]} features"
             )
             return X, y
-
+            
         except Exception as e:
             logger.error(f"Error preparing features: {str(e)}")
             raise
-    def train(self, data: pd.DataFrame) -> None:
-        """
-        Train the model with comprehensive error handling and validation.
 
+    def _calculate_performance_metrics(self, predictions: np.ndarray, y: np.ndarray, returns: np.ndarray) -> Dict[str, float]:
+        """
+        Calculate comprehensive performance metrics for the model.
+        
         Args:
-            data: Market data for training
-        """
-        try:
-            logger.info("Starting model training...")
-
-            # Validate input data
-            self._validate_data(data)
-
-            # Calculate indicators using IndicatorCalculator
-            try:
-                data = self.indicator_calculator.calculate_indicators(data)
-            except Exception as e:
-                logger.error(f"Error calculating indicators: {str(e)}")
-                raise ValueError("Failed to calculate indicators")
-
-            # Split data into training and validation sets
-            try:
-                train_size = int(len(data) * 0.7)
-                if train_size < self.lookback_period:
-                    raise ValueError(f"Insufficient training data: {train_size} < {self.lookback_period}")
-
-                train_data = data.iloc[:train_size]
-                val_data = data.iloc[train_size:]
-            except Exception as e:
-                logger.error(f"Error splitting data: {str(e)}")
-                raise ValueError("Failed to split data")
-
-            # Prepare features
-            try:
-                X_train, y_train = self.prepare_features(train_data)
-                X_val, y_val = self.prepare_features(val_data)
-            except Exception as e:
-                logger.error(f"Error preparing features: {str(e)}")
-                raise ValueError("Failed to prepare features")
-
-            # Store training data for future updates
-            self.X_train = X_train
-            self.y_train = y_train
-
-            # Log types and shapes
-            logger.debug(f"X_train type: {type(X_train)}, shape: {X_train.shape}")
-            logger.debug(f"y_train type: {type(y_train)}, shape: {y_train.shape}")
-            logger.debug(f"X_val type: {type(X_val)}, shape: {X_val.shape}")
-            logger.debug(f"y_val type: {type(y_val)}, shape: {y_val.shape}")
-
-            # Ensure y_train and y_val are array-like and not scalars
-            if isinstance(y_train, (int, float)) or np.isscalar(y_train):
-                y_train = np.array([y_train])
-            if isinstance(y_val, (int, float)) or np.isscalar(y_val):
-                y_val = np.array([y_val])
-
-            # Fit the pipeline and transform data
-            try:
-                X_train_scaled = self.pipeline.fit_transform(X_train)
-                X_val_scaled = self.pipeline.transform(X_val)
-            except Exception as e:
-                logger.error(f"Error in data transformation: {str(e)}")
-                raise ValueError("Failed to transform data")
-
-            # Ensure that the lengths of X and y match
-            if len(X_train_scaled) != len(y_train):
-                logger.error(f"Length mismatch: X_train_scaled has {len(X_train_scaled)} samples, y_train has {len(y_train)} samples")
-                raise ValueError("Feature and target lengths do not match in training data")
-            if len(X_val_scaled) != len(y_val):
-                logger.error(f"Length mismatch: X_val_scaled has {len(X_val_scaled)} samples, y_val has {len(y_val)} samples")
-                raise ValueError("Feature and target lengths do not match in validation data")
-
-            # Train model
-            logger.info("Training model...")
-            try:
-                self.model.fit(X_train_scaled, y_train)
-            except Exception as e:
-                logger.error(f"Error fitting model: {str(e)}")
-                raise ValueError("Failed to fit model")
-
-            # Get predictions
-            try:
-                train_predictions = self.model.predict_proba(X_train_scaled)[:, 1]
-                val_predictions = self.model.predict_proba(X_val_scaled)[:, 1]
-            except Exception as e:
-                logger.error(f"Error generating predictions: {str(e)}")
-                raise ValueError("Failed to generate predictions")
-
-            # Calculate returns
-            try:
-                train_returns = train_data['close'].pct_change().shift(-1).dropna().values
-                val_returns = val_data['close'].pct_change().shift(-1).dropna().values
-
-                # Ensure alignment of returns and predictions
-                min_len_train = min(len(train_predictions), len(train_returns), len(y_train))
-                train_predictions = train_predictions[-min_len_train:]
-                train_returns = train_returns[-min_len_train:]
-                y_train = y_train[-min_len_train:]
-
-                min_len_val = min(len(val_predictions), len(val_returns), len(y_val))
-                val_predictions = val_predictions[-min_len_val:]
-                val_returns = val_returns[-min_len_val:]
-                y_val = y_val[-min_len_val:]
-            except Exception as e:
-                logger.error(f"Error calculating returns: {str(e)}")
-                raise ValueError("Failed to calculate returns")
-
-            # Calculate performance metrics
-            try:
-                in_sample_metrics = self._calculate_performance_metrics(
-                    train_predictions,
-                    y_train,
-                    train_returns
-                )
-                out_sample_metrics = self._calculate_performance_metrics(
-                    val_predictions,
-                    y_val,
-                    val_returns
-                )
-            except Exception as e:
-                logger.error(f"Error calculating metrics: {str(e)}")
-                raise ValueError("Failed to calculate performance metrics")
-
-            # Get model parameters
-            model_parameters = self.get_parameters()
-
-            # Initialize overfitting_scores
-            overfitting_scores = {}
-
-            # Check for overfitting
-            try:
-                is_overfitting, overfitting_scores = self.overfitting_controller.detect_overfitting(
-                    in_sample_metrics=in_sample_metrics,
-                    out_sample_metrics=out_sample_metrics,
-                    market_regime=self.current_market_regime,
-                    model_parameters=model_parameters
-                )
-
-                if is_overfitting:
-                    logger.warning("Overfitting detected, adjusting model parameters...")
-                    adjusted_params = self.overfitting_controller.adjust_model(
-                        model=self.model,
-                        overfitting_scores=overfitting_scores,
-                        market_regime=self.current_market_regime
-                    )
-
-                    self.model.set_params(**adjusted_params)
-                    self.model.fit(X_train_scaled, y_train)
-
-                    # Recalculate predictions and metrics after adjustment
-                    train_predictions = self.model.predict_proba(X_train_scaled)[:, 1]
-                    val_predictions = self.model.predict_proba(X_val_scaled)[:, 1]
-
-                    # Re-align data
-                    min_len_train = min(len(train_predictions), len(train_returns), len(y_train))
-                    train_predictions = train_predictions[-min_len_train:]
-                    train_returns = train_returns[-min_len_train:]
-                    y_train = y_train[-min_len_train:]
-
-                    min_len_val = min(len(val_predictions), len(val_returns), len(y_val))
-                    val_predictions = val_predictions[-min_len_val:]
-                    val_returns = val_returns[-min_len_val:]
-                    y_val = y_val[-min_len_val:]
-
-                    in_sample_metrics = self._calculate_performance_metrics(
-                        train_predictions,
-                        y_train,
-                        train_returns
-                    )
-                    out_sample_metrics = self._calculate_performance_metrics(
-                        val_predictions,
-                        y_val,
-                        val_returns
-                    )
-            except Exception as e:
-                logger.error(f"Error in overfitting control: {str(e)}")
-                raise ValueError("Failed in overfitting control")
-
-            # Generate and save report
-            try:
-                report = self.overfitting_controller.generate_report(
-                    in_sample_metrics=in_sample_metrics,
-                    out_sample_metrics=out_sample_metrics,
-                    market_regime=self.current_market_regime,
-                    overfitting_scores=overfitting_scores
-                )
-                self._save_training_report(report)
-            except Exception as e:
-                logger.error(f"Error generating/saving report: {str(e)}")
-
-            logger.info("Model training completed successfully")
-
-        except Exception as e:
-            logger.error(f"Error in model training: {str(e)}")
-            raise
-    def predict(self, data: pd.DataFrame) -> float:
-        """
-        Generate predictions with comprehensive error handling.
-
-        Args:
-            data: Market data
-
+            predictions (np.ndarray): Model predictions
+            y (np.ndarray): Actual target values 
+            returns (np.ndarray): Actual returns
+            
         Returns:
-            Prediction probability
+            dict: Dictionary containing various performance metrics
         """
         try:
-            # Validate input data
-            self._validate_data(data)
+            # Ensure arrays are the same length
+            min_length = min(len(returns), len(predictions), len(y))
+            returns = returns[-min_length:]
+            predictions = predictions[-min_length:]
+            y = y[-min_length:]
 
-            if self.model is None:
-                raise ValueError("Model not trained. Please train the model first.")
-
-            if not self._is_pipeline_fitted():
-                raise ValueError("Pipeline not fitted. Please train the model first.")
-
-            # Calculate indicators using IndicatorCalculator
-            try:
-                data = self.indicator_calculator.calculate_indicators(data)
-            except Exception as e:
-                logger.error(f"Error calculating indicators for prediction: {str(e)}")
-                raise ValueError("Failed to calculate indicators")
-
-            # Prepare features
-            try:
-                X, _ = self.prepare_features(data)
-                if len(X) == 0:
-                    raise ValueError("No valid features after preparation")
-            except Exception as e:
-                logger.error(f"Error preparing features for prediction: {str(e)}")
-                raise ValueError("Failed to prepare features")
-
-            # Transform features
-            try:
-                X_transformed = self.pipeline.transform(X)
-            except Exception as e:
-                logger.error(f"Error transforming features: {str(e)}")
-                raise ValueError("Failed to transform features")
-
-            # Generate prediction
-            try:
-                prediction = self.model.predict_proba(X_transformed[-1].reshape(1, -1))[0][1]
-                logger.info(f"Generated prediction: {prediction:.4f}")
-                return prediction
-            except Exception as e:
-                logger.error(f"Error generating prediction: {str(e)}")
-                raise ValueError("Failed to generate prediction")
-
-        except Exception as e:
-            logger.error(f"Error in prediction: {str(e)}")
-            raise
-    def update(self, new_data: pd.DataFrame, market_regime: str) -> None:
-        """
-        Update the model with new data and market regime information.
-
-        Args:
-            new_data: New market data
-            market_regime: Current market regime
-        """
-        try:
-            # Validate input
-            self._validate_data(new_data)
-            if not isinstance(market_regime, str):
-                raise ValueError("market_regime must be a string")
-
-            self.current_market_regime = market_regime
-
-            # Calculate indicators
-            try:
-                new_data = self.indicator_calculator.calculate_indicators(new_data)
-            except Exception as e:
-                logger.error(f"Error calculating indicators for update: {str(e)}")
-                raise ValueError("Failed to calculate indicators")
-
-            # Prepare features
-            try:
-                X_new, y_new = self.prepare_features(new_data)
-                if len(X_new) == 0 or len(y_new) == 0:
-                    raise ValueError("No valid data for update")
-            except Exception as e:
-                logger.error(f"Error preparing features for update: {str(e)}")
-                raise ValueError("Failed to prepare features")
-
-            # Transform new data
-            if not self._is_pipeline_fitted():
-                raise ValueError("Pipeline not fitted. Cannot update model without a fitted pipeline.")
-
-            try:
-                X_transformed = self.pipeline.transform(X_new)
-            except Exception as e:
-                logger.error(f"Error transforming update data: {str(e)}")
-                raise ValueError("Failed to transform update data")
-
-            # Get predictions for performance calculation
-            try:
-                predictions = self.model.predict_proba(X_transformed)[:, 1]
-                returns = new_data['close'].pct_change().shift(-1).dropna().values
-                # Ensure alignment of returns and predictions
-                min_length = min(len(predictions), len(returns), len(y_new))
-                predictions = predictions[-min_length:]
-                returns = returns[-min_length:]
-                y_new = y_new[-min_length:]
-            except Exception as e:
-                logger.error(f"Error calculating predictions/returns: {str(e)}")
-                raise ValueError("Failed to calculate predictions or returns")
-
-            # Calculate performance metrics
-            try:
-                performance_metrics = self._calculate_performance_metrics(
-                    predictions, y_new, returns
-                )
-                self.performance_history.append(performance_metrics)
-            except Exception as e:
-                logger.error(f"Error calculating update metrics: {str(e)}")
-                raise ValueError("Failed to calculate performance metrics")
-
-            # Update the model incrementally if supported
-            if hasattr(self.model, 'partial_fit'):
-                try:
-                    classes = np.unique(y_new)
-                    self.model.partial_fit(X_transformed, y_new, classes=classes)
-                    logger.info("Model successfully updated with new data using partial_fit")
-                except Exception as e:
-                    logger.error(f"Error updating model with partial_fit: {str(e)}")
-                    raise ValueError("Failed to update model with partial_fit")
-            else:
-                # Retrain the model with combined old and new data
-                try:
-                    # Ensure self.X_train and self.y_train exist
-                    if self.X_train is None or self.y_train is None:
-                        raise ValueError("Training data not available for full retrain")
-
-                    # Combine data
-                    X_combined = np.vstack([self.X_train, X_transformed])
-                    y_combined = np.concatenate([self.y_train, y_new])
-
-                    # Retrain the model
-                    self.model.fit(X_combined, y_combined)
-
-                    # Update stored training data
-                    self.X_train = X_combined
-                    self.y_train = y_combined
-
-                    logger.info("Model successfully retrained with combined data")
-                except Exception as e:
-                    logger.error(f"Error retraining model: {str(e)}")
-                    raise ValueError("Failed to retrain model with combined data")
-
-        except Exception as e:
-            logger.error(f"Error updating model: {str(e)}")
-            raise
-    def get_feature_importance(self) -> Dict[str, float]:
-        """
-        Get feature importance scores with error handling.
-
-        Returns:
-            Dictionary of feature importances
-        """
-        try:
-            if self.model is None:
-                raise ValueError("Model not trained. Please train the model first.")
-
-            if not hasattr(self.model, 'feature_importances_'):
-                raise ValueError("Model does not support feature importances")
-
-            importances = self.model.feature_importances_
-            if len(importances) != len(self.feature_columns):
-                raise ValueError("Feature importance length mismatch")
-
-            return dict(zip(self.feature_columns, importances))
-
-        except Exception as e:
-            logger.error(f"Error getting feature importance: {str(e)}")
-            raise
-    def get_parameters(self) -> Dict[str, Any]:
-        """
-        Get current model parameters with error handling.
-
-        Returns:
-            Dictionary of model parameters
-        """
-        try:
-            if self.model is None:
-                raise ValueError("Model not trained. Please train the model first.")
-
-            params = self.model.get_params()
-            return params
-
-        except Exception as e:
-            logger.error(f"Error getting parameters: {str(e)}")
-            raise
-
-    def set_parameters(self, parameters: Dict[str, Any]) -> None:
-        """
-        Set model parameters with validation.
-
-        Args:
-            parameters: Dictionary of parameters to set
-        """
-        try:
-            if not isinstance(parameters, dict):
-                raise ValueError("Parameters must be provided as a dictionary")
-
-            if self.model is None:
-                raise ValueError("Model not initialized")
-
-            # Validate parameters before setting
-            valid_params = self.model.get_params()
-            for param in parameters:
-                if param not in valid_params:
-                    raise ValueError(f"Invalid parameter: {param}")
-
-            self.model.set_params(**parameters)
-            logger.info("Model parameters updated successfully")
-
-        except Exception as e:
-            logger.error(f"Error setting parameters: {str(e)}")
-            raise
-    def _save_training_report(self, report: Dict[str, Any]) -> None:
-        """
-        Save training report to file with error handling.
-
-        Args:
-            report: Dictionary containing training report data
-        """
-        try:
-            if not isinstance(report, dict):
-                raise ValueError("Report must be a dictionary")
-
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            report_path = f"training_reports/model_report_{timestamp}.json"
-
-            # Create directory if it doesn't exist
-            try:
-                os.makedirs("training_reports", exist_ok=True)
-            except Exception as e:
-                logger.error(f"Error creating report directory: {str(e)}")
-                raise ValueError("Failed to create report directory")
-
-            # Add metadata to report
-            report['timestamp'] = timestamp
-            report['model_parameters'] = self.get_parameters()
-            report['feature_importance'] = self.get_feature_importance()
-
-            # Save report
-            try:
-                with open(report_path, 'w') as f:
-                    json.dump(report, f, indent=4)
-                logger.info(f"Training report saved to {report_path}")
-            except Exception as e:
-                logger.error(f"Error writing report to file: {str(e)}")
-                raise ValueError("Failed to write report to file")
-
-        except Exception as e:
-            logger.error(f"Error saving training report: {str(e)}")
-            raise
-    def save_model(self, path: str) -> None:
-        """
-        Save model state and components with error handling.
-
-        Args:
-            path: Path to save the model
-        """
-        try:
-            if not isinstance(path, str):
-                raise ValueError("Path must be a string")
-
-            if self.model is None:
-                raise ValueError("No trained model to save")
-
-            # Prepare model state
-            model_state = {
-                'model': self.model,
-                'pipeline': self.pipeline,
-                'feature_columns': self.feature_columns,
-                'lookback_period': self.lookback_period,
-                'current_market_regime': self.current_market_regime,
-                'performance_history': self.performance_history,
-                'indicator_thresholds': self.indicator_thresholds,
-                'market_params': self.market_params,
-                'signal_thresholds': self.signal_thresholds,
-                'X_train': self.X_train,
-                'y_train': self.y_train
+            # Calculate classification metrics
+            actual_signals = y
+            predicted_signals = predictions > 0.5  # Convert probabilities to binary predictions
+            
+            accuracy = accuracy_score(actual_signals, predicted_signals)
+            precision = precision_score(actual_signals, predicted_signals)
+            recall = recall_score(actual_signals, predicted_signals)
+            f1 = f1_score(actual_signals, predicted_signals)
+            
+            # Calculate trading metrics
+            strategy_returns = returns * np.where(predicted_signals, 1, -1)
+            cumulative_returns = np.cumsum(strategy_returns)
+            
+            # Calculate max drawdown
+            peak = np.maximum.accumulate(cumulative_returns)
+            drawdown = (cumulative_returns - peak) / peak
+            max_drawdown = abs(np.min(drawdown))
+            
+            # Calculate volatility (annualized)
+            volatility = np.std(strategy_returns) * np.sqrt(252)
+            
+            # Calculate Sharpe Ratio (annualized)
+            excess_returns = strategy_returns - self.risk_free_rate/252  # Daily risk-free rate
+            sharpe_ratio = np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)
+            
+            # Calculate win rate
+            profitable_trades = np.sum(strategy_returns > 0)
+            total_trades = len(strategy_returns)
+            win_rate = profitable_trades / total_trades if total_trades > 0 else 0
+            
+            # Calculate profit factor
+            gross_profits = np.sum(strategy_returns[strategy_returns > 0])
+            gross_losses = abs(np.sum(strategy_returns[strategy_returns < 0]))
+            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
+            
+            # Calculate average return
+            avg_return = np.mean(strategy_returns)
+            
+            return {
+                'accuracy': accuracy,
+                'precision': precision,
+                'recall': recall,
+                'f1_score': f1,
+                'max_drawdown': max_drawdown,
+                'volatility': volatility,
+                'sharpe_ratio': sharpe_ratio,
+                'win_rate': win_rate,
+                'profit_factor': profit_factor,
+                'avg_return': avg_return,
+                'total_trades': total_trades,
+                'profitable_trades': profitable_trades
             }
-
-            # Save model state
-            try:
-                joblib.dump(model_state, f"{path}_model.joblib")
-            except Exception as e:
-                logger.error(f"Error saving model state: {str(e)}")
-                raise ValueError("Failed to save model state")
-
-            # Save overfitting controller state
-            try:
-                self.overfitting_controller.save_state(f"{path}_overfitting_controller.json")
-            except Exception as e:
-                logger.error(f"Error saving overfitting controller: {str(e)}")
-                raise ValueError("Failed to save overfitting controller")
-
-            logger.info(f"Model saved successfully to {path}")
-
+            
         except Exception as e:
-            logger.error(f"Error saving model: {str(e)}")
+            logger.error(f"Error calculating performance metrics: {str(e)}")
             raise
 
-    @classmethod
-    def load_model(cls, path: str) -> 'MachineLearningModel':
-        """
-        Load model state and components with error handling, and return a new instance.
-
-        Args:
-            path: Path to load the model from
-
-        Returns:
-            Instance of MachineLearningModel with loaded state
-        """
-        try:
-            if not isinstance(path, str):
-                raise ValueError("Path must be a string")
-
-            # Load model state
-            try:
-                model_state = joblib.load(f"{path}_model.joblib")
-            except Exception as e:
-                logger.error(f"Error loading model state: {str(e)}")
-                raise ValueError("Failed to load model state")
-
-            # Validate model state
-            required_keys = {
-                'model', 'pipeline', 'feature_columns', 'lookback_period',
-                'current_market_regime', 'performance_history',
-                'indicator_thresholds', 'market_params', 'signal_thresholds',
-                'X_train', 'y_train'
-            }
-            missing_keys = required_keys - set(model_state.keys())
-            if missing_keys:
-                raise ValueError(f"Incomplete model state, missing: {missing_keys}")
-
-            # Create a new instance with loaded model and pipeline
-            instance = cls(
-                lookback_period=model_state['lookback_period'],
-                model=model_state['model'],
-                pipeline=model_state['pipeline']
-            )
-
-            # Restore other attributes
-            instance.feature_columns = model_state['feature_columns']
-            instance.current_market_regime = model_state['current_market_regime']
-            instance.performance_history = model_state['performance_history']
-            instance.indicator_thresholds = model_state['indicator_thresholds']
-            instance.market_params = model_state['market_params']
-            instance.signal_thresholds = model_state['signal_thresholds']
-            instance.X_train = model_state['X_train']
-            instance.y_train = model_state['y_train']
-
-            # Load overfitting controller state
-            try:
-                instance.overfitting_controller.load_state(f"{path}_overfitting_controller.json")
-            except Exception as e:
-                logger.error(f"Error loading overfitting controller: {str(e)}")
-                raise ValueError("Failed to load overfitting controller")
-
-            logger.info(f"Model loaded successfully from {path}")
-            return instance
-
-        except Exception as e:
-            logger.error(f"Error loading model: {str(e)}")
-            raise
     def _calculate_performance_metrics(self, predictions: np.ndarray, y: np.ndarray, returns: np.ndarray) -> PerformanceMetrics:
         """
         Calculate comprehensive performance metrics for the model.
-
+        
         Args:
             predictions: Model predictions
-            y: Actual target values
+            y: Actual target values 
             returns: Actual returns
-
+            
         Returns:
             PerformanceMetrics object
         """
         try:
-            # Input validation
-            if not isinstance(predictions, np.ndarray) or not isinstance(y, np.ndarray) or not isinstance(returns, np.ndarray):
-                raise ValueError("Inputs must be numpy arrays")
-
             # Ensure arrays are the same length
             min_length = min(len(returns), len(predictions), len(y))
-            if min_length == 0:
-                raise ValueError("Empty arrays provided")
-
             returns = returns[-min_length:]
             predictions = predictions[-min_length:]
             y = y[-min_length:]
 
             # Calculate strategy returns
-            try:
-                strategy_returns = returns * np.where(predictions > 0.5, 1, -1)
-            except Exception as e:
-                logger.error(f"Error calculating strategy returns: {str(e)}")
-                raise ValueError("Error calculating strategy returns")
-
+            strategy_returns = returns * np.where(predictions > 0.5, 1, -1)
+            
             # Calculate metrics
             winning_trades = np.sum(strategy_returns > 0)
             total_trades = len(strategy_returns)
@@ -864,22 +386,14 @@ class MachineLearningModel:
             profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
 
             # Calculate volatility and Sharpe ratio
-            try:
-                volatility = np.std(strategy_returns) * np.sqrt(252)
-                sharpe_ratio = (np.mean(strategy_returns) - self.risk_free_rate/252) / volatility * np.sqrt(252) if volatility != 0 else 0
-            except Exception as e:
-                logger.error(f"Error calculating volatility metrics: {str(e)}")
-                raise ValueError("Error calculating volatility metrics")
+            volatility = np.std(strategy_returns) * np.sqrt(252)
+            sharpe_ratio = np.mean(strategy_returns) / volatility * np.sqrt(252) if volatility != 0 else 0
 
             # Calculate max drawdown
-            try:
-                cumulative_returns = np.cumprod(1 + strategy_returns)
-                running_max = np.maximum.accumulate(cumulative_returns)
-                drawdowns = (cumulative_returns - running_max) / running_max
-                max_drawdown = abs(np.min(drawdowns)) if len(drawdowns) > 0 else 0
-            except Exception as e:
-                logger.error(f"Error calculating drawdown: {str(e)}")
-                raise ValueError("Error calculating drawdown")
+            cumulative_returns = (1 + strategy_returns).cumprod()
+            running_max = np.maximum.accumulate(cumulative_returns)
+            drawdowns = (cumulative_returns - running_max) / running_max
+            max_drawdown = abs(np.min(drawdowns)) if len(drawdowns) > 0 else 0
 
             # Create PerformanceMetrics object
             return PerformanceMetrics(
@@ -892,48 +406,324 @@ class MachineLearningModel:
 
         except Exception as e:
             logger.error(f"Error calculating performance metrics: {str(e)}")
+        raise
+
+    def train(self, data: pd.DataFrame) -> None:
+        try:
+            logger.info("Starting model training...")
+            
+            # Calculate indicators using IndicatorCalculator
+            data = self.indicator_calculator.calculate_indicators(data)
+            
+            # Split data into training and validation sets
+            train_size = int(len(data) * 0.7)
+            train_data = data.iloc[:train_size]
+            val_data = data.iloc[train_size:]
+            
+            # Prepare features
+            X_train, y_train = self.prepare_features(train_data)
+            X_val, y_val = self.prepare_features(val_data)
+            
+            # Fit the pipeline on training data and transform
+            X_train_scaled = self.pipeline.fit_transform(X_train)
+            X_val_scaled = self.pipeline.transform(X_val)
+            
+            # Train model
+            logger.info("Training model...")
+            self.model.fit(X_train_scaled, y_train)
+            
+            # Get predictions
+            train_predictions = self.model.predict_proba(X_train_scaled)[:, 1]
+            val_predictions = self.model.predict_proba(X_val_scaled)[:, 1]
+            
+            # Calculate returns
+            train_returns = train_data['close'].pct_change().dropna().values
+            val_returns = val_data['close'].pct_change().dropna().values
+            
+            # Ensure alignment of returns and predictions
+            train_returns = train_returns[-len(train_predictions):]
+            val_returns = val_returns[-len(val_predictions):]
+            
+            # Calculate performance metrics
+            in_sample_metrics = self._calculate_performance_metrics(
+                train_predictions,
+                y_train,
+                train_returns
+            )
+            out_sample_metrics = self._calculate_performance_metrics(
+                val_predictions,
+                y_val,
+                val_returns
+            )
+            
+            # Get model parameters
+            model_parameters = {
+                'n_features': len(self.feature_columns),
+                'max_depth': self.model.max_depth,
+                'n_estimators': self.model.n_estimators,
+                'min_samples_leaf': self.model.min_samples_leaf
+            }
+
+            # Check for overfitting
+            is_overfitting, overfitting_scores = self.overfitting_controller.detect_overfitting(
+                in_sample_metrics=in_sample_metrics,
+                out_sample_metrics=out_sample_metrics,
+                market_regime=self.current_market_regime,
+                model_parameters=model_parameters
+            )
+
+            if is_overfitting:
+                logger.warning("Overfitting detected, adjusting model parameters...")
+                adjusted_params = self.overfitting_controller.adjust_model(
+                    model=self.model,
+                    overfitting_scores=overfitting_scores,
+                    market_regime=self.current_market_regime
+                )
+                
+                self.model.set_params(**adjusted_params)
+                self.model.fit(X_train_scaled, y_train)
+                
+                # Recalculate metrics after adjustment
+                train_predictions = self.model.predict_proba(X_train_scaled)[:, 1]
+                val_predictions = self.model.predict_proba(X_val_scaled)[:, 1]
+                
+                # Re-align returns
+                train_returns = train_data['close'].pct_change().dropna().values
+                val_returns = val_data['close'].pct_change().dropna().values
+                train_returns = train_returns[-len(train_predictions):]
+                val_returns = val_returns[-len(val_predictions):]
+                
+                in_sample_metrics = self._calculate_performance_metrics(
+                    train_predictions,
+                    y_train,
+                    train_returns
+                )
+                out_sample_metrics = self._calculate_performance_metrics(
+                    val_predictions,
+                    y_val,
+                    val_returns
+                )
+
+            # Generate report
+            report = self.overfitting_controller.generate_report(
+                in_sample_metrics=in_sample_metrics,
+                out_sample_metrics=out_sample_metrics,
+                market_regime=self.current_market_regime,
+                overfitting_scores=overfitting_scores
+            )
+            
+            # Save report
+            self._save_training_report(report)
+            
+            logger.info("Model training completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Error in model training: {e}")
             raise
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+
+    
+    def predict(self, data: pd.DataFrame) -> float:
         """
-        Generate trading signals based on the model's predictions.
-
+        Generate predictions with the trained model.
+        
         Args:
-            data: DataFrame with market data.
-
+            data: Market data
+        
         Returns:
-            Series with signals (1 for buy, -1 for sell, 0 for hold)
+            Prediction probability
         """
         try:
-            # Validate and prepare data
-            self._validate_data(data)
-            if not self._is_pipeline_fitted():
-                raise ValueError("Pipeline not fitted. Please train the model first.")
-
+            # Calculate indicators using IndicatorCalculator
             data = self.indicator_calculator.calculate_indicators(data)
+            
             X, _ = self.prepare_features(data)
             if len(X) == 0:
                 raise ValueError("No valid features after preparation")
+            
+            # Check if the pipeline is fitted
+            if not self._is_pipeline_fitted():
+                raise ValueError("Pipeline is not fitted. Cannot transform data.")
+                
+            # Use the fitted pipeline to transform the data
+            X_transformed = self.pipeline.transform(X[-1].reshape(1, -1))
+            prediction = self.model.predict_proba(X_transformed)[0][1]
+            return prediction
+            
+        except Exception as e:
+            logger.error(f"Error in prediction: {e}")
+            raise
 
-            # Transform features
-            X_transformed = self.pipeline.transform(X)
 
-            # Generate predictions
-            prediction_probabilities = self.model.predict_proba(X_transformed)[:, 1]
+    def update(self, new_data: pd.DataFrame, market_regime: str) -> None:
+        """
+        Update the model with new data.
+        
+        Args:
+            new_data: New market data
+            market_regime: Current market regime
+        """
+        try:
+            self.current_market_regime = market_regime
 
-            # Generate signals based on thresholds
-            signals = pd.Series(
-                np.where(
-                    prediction_probabilities > self.signal_thresholds['base_bull'], 1,
-                    np.where(
-                        prediction_probabilities < self.signal_thresholds['base_bear'], -1,
-                        0
-                    )
-                ),
-                index=data.index[-len(prediction_probabilities):]
+            # Calculate indicators using IndicatorCalculator
+            new_data = self.indicator_calculator.calculate_indicators(new_data)
+
+            X_new, y_new = self.prepare_features(new_data)
+
+            if len(X_new) == 0:
+                raise ValueError("No valid data for update")
+
+            # Check if the pipeline is fitted
+            if not self._is_pipeline_fitted():
+                logger.info("Pipeline not fitted. Fitting pipeline with new data...")
+                # Fit the pipeline with new data
+                X_new = self.pipeline.fit_transform(X_new)
+            else:
+                # Transform new data using the fitted pipeline
+                X_new = self.pipeline.transform(X_new)
+
+            # Get current predictions
+            predictions = self.model.predict_proba(X_new)[:, 1]
+            returns = new_data['close'].pct_change().dropna().values
+
+            # Ensure alignment of returns and predictions
+            returns = returns[-len(predictions):]
+
+            # Calculate performance metrics
+            performance_metrics = self._calculate_performance_metrics(
+                predictions, y_new, returns
             )
 
-            return signals
+            # Store performance history
+            self.performance_history.append(performance_metrics)
+
+            # Update the model with new data
+            self.model.fit(X_new, y_new)
+
+            logger.info("Model successfully updated with new data")
 
         except Exception as e:
-            logger.error(f"Error generating signals: {str(e)}")
+            logger.error(f"Error updating model: {e}")
+            raise
+
+    def get_feature_importance(self) -> Dict[str, float]:
+        """Get feature importance scores."""
+        return dict(zip(self.feature_columns, self.model.feature_importances_))
+
+    def get_parameters(self) -> Dict[str, Any]:
+        """Get current model parameters."""
+        return {
+            'n_features': len(self.feature_columns),
+            'max_depth': self.model.max_depth,
+            'n_estimators': self.model.n_estimators,
+            'min_samples_leaf': self.model.min_samples_leaf
+        }
+
+    def set_parameters(self, parameters: Dict[str, Any]) -> None:
+        """Set model parameters."""
+        self.model.set_params(**parameters)
+
+    def _save_training_report(self, report: Dict[str, Any]) -> None:
+        """Save training report to file."""
+        try:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            report_path = f"training_reports/model_report_{timestamp}.json"
+            
+            os.makedirs("training_reports", exist_ok=True)
+            
+            with open(report_path, 'w') as f:
+                json.dump(report, f, indent=4)
+                
+            logger.info(f"Training report saved to {report_path}")
+            
+        except Exception as e:
+            logger.error(f"Error saving training report: {e}")
+
+    def save_model(self, path: str) -> None:
+        """Save model state and components."""
+        try:
+            model_state = {
+                'model': self.model,
+                'pipeline': self.pipeline,
+                'feature_columns': self.feature_columns,
+                'lookback_period': self.lookback_period,
+                'current_market_regime': self.current_market_regime
+            }
+            
+            # Save model state
+            joblib.dump(model_state, f"{path}_model.joblib")
+            
+            # Save overfitting controller state
+            self.overfitting_controller.save_state(f"{path}_overfitting_controller.json")
+            
+            logger.info(f"Model saved to {path}")
+            
+        except Exception as e:
+            logger.error(f"Error saving model: {e}")
+            raise
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        """
+        Generate trading signals based on model predictions.
+        
+        Args:
+            data: Market data DataFrame
+            
+        Returns:
+            Series of trading signals (-1, 0, 1)
+        """
+        try:
+            # Get prediction probabilities
+            probabilities = []
+            
+            # Process data in chunks to generate signals
+            for i in range(len(data)):
+                if i < self.lookback_period:
+                    probabilities.append(0.5)  # Default to neutral for insufficient data
+                    continue
+                    
+                # Get data slice for prediction
+                data_slice = data.iloc[max(0, i-self.lookback_period):i+1]
+                
+                # Get prediction probability
+                prob = self.predict(data_slice)
+                probabilities.append(prob)
+                
+            # Convert probabilities to signals
+            signal_threshold = 0.75  # High conviction threshold
+            signals = pd.Series(index=data.index, dtype=float)
+            
+            for i, prob in enumerate(probabilities):
+                if prob > signal_threshold:
+                    signals.iloc[i] = 1  # Long signal
+                elif prob < (1 - signal_threshold):
+                    signals.iloc[i] = -1  # Short signal
+                else:
+                    signals.iloc[i] = 0  # No signal
+                    
+            return signals
+            
+        except Exception as e:
+            logger.error(f"Error generating signals: {e}")
+            # Return neutral signals in case of error
+            return pd.Series(0, index=data.index)
+
+    def load_model(self, path: str) -> None:
+        """Load model state and components."""
+        try:
+            # Load model state
+            model_state = joblib.load(f"{path}_model.joblib")
+            
+            self.model = model_state['model']
+            self.pipeline = model_state['pipeline']  # Load the fitted pipeline
+            self.feature_columns = model_state['feature_columns']
+            self.lookback_period = model_state['lookback_period']
+            self.current_market_regime = model_state['current_market_regime']
+            
+            # Load overfitting controller state
+            self.overfitting_controller.load_state(f"{path}_overfitting_controller.json")
+            
+            logger.info(f"Model loaded from {path}")
+            
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
             raise

@@ -42,7 +42,7 @@ class BacktestConfig:
     early_stopping_patience: int = 10
     min_performance_threshold: float = 0.5
     max_correlation_threshold: float = 0.7
-class EnhancedBacktest:
+class Backtest:
     """
     Enhanced backtesting system with walk-forward optimization
     and Monte Carlo simulation capabilities.
@@ -227,24 +227,22 @@ class EnhancedBacktest:
         try:
             # Validate data length
             data_length = len(self.data)
-            min_train_size = 50  # Reduced minimum training size
-            min_test_size = 20   # Reduced minimum test size
-            
-            # Calculate maximum splits
-            max_splits = (data_length - min_train_size) // min_test_size
-            n_splits = min(n_splits, max_splits)
-            
-            if n_splits < 1:
-                raise ValueError(f"Insufficient data for splitting: {data_length} points")
-                
-            # Initialize TimeSeriesSplit
-            tscv = TimeSeriesSplit(n_splits=n_splits, test_size=min_test_size)
-            
+            min_train_size = 50  # Minimum training size
+            min_test_size = 20   # Minimum test size
+
+            # Check if data is sufficient for the desired number of splits
+            if data_length < (min_train_size + min_test_size) * n_splits:
+                raise ValueError(f"Insufficient data for {n_splits} splits with train size {min_train_size} and test size {min_test_size}")
+
+            # Initialize TimeSeriesSplit without test_size
+            tscv = TimeSeriesSplit(n_splits=n_splits)
+
             # Run parallel walk-forward optimization
             with ThreadPoolExecutor(max_workers=n_jobs if n_jobs > 0 else None) as executor:
                 futures = []
                 for train_idx, test_idx in tscv.split(self.data):
-                    if len(train_idx) >= min_train_size and len(test_idx) >= min_test_size:
+                    # Ensure test set meets minimum size
+                    if len(test_idx) >= min_test_size and len(train_idx) >= min_train_size:
                         future = executor.submit(
                             self._run_single_split,
                             train_idx,
@@ -252,7 +250,7 @@ class EnhancedBacktest:
                             strategy
                         )
                         futures.append(future)
-                        
+
                 # Collect results
                 all_results = []
                 for future in futures:
@@ -263,17 +261,18 @@ class EnhancedBacktest:
                     except Exception as e:
                         logger.error(f"Error in split execution: {e}")
                         continue
-                        
+
                 if not all_results:
                     raise ValueError("No valid results from any split")
-                    
+
                 # Combine results
                 self.results = pd.concat(all_results)
                 return self.results
-                
+
         except Exception as e:
             logger.error(f"Error running backtest: {e}")
             raise
+
     
     def _run_walk_forward(self, strategy: Any) -> pd.DataFrame:
         """
@@ -310,8 +309,8 @@ class EnhancedBacktest:
         Run backtest on a single train/test split.
         
         Args:
-            train_index: Training data indices
-            test_index: Test data indices
+            train_index: Training data indices (array-like)
+            test_index: Test data indices (array-like)
             strategy: Trading strategy
             
         Returns:
@@ -377,6 +376,59 @@ class EnhancedBacktest:
         except Exception as e:
             logger.error(f"Error in single backtest: {e}")
             raise
+
+    def classify_market_conditions(self, data: pd.DataFrame) -> pd.Series:
+        # Calculate necessary indicators
+        data['SMA50'] = data['close'].rolling(window=50).mean()
+        data['SMA200'] = data['close'].rolling(window=200).mean()
+        data['Volatility'] = data['Returns'].rolling(window=20).std() * np.sqrt(252)
+        data['Volume_MA'] = data['Volume'].rolling(window=20).mean()
+        data['Momentum'] = data['close'].pct_change(periods=20)
+
+        conditions = []
+        for i in range(len(data)):
+            if i < 200:  # Not enough data for classification
+                conditions.append('Undefined')
+                continue
+
+            current = data.iloc[i]
+            
+            # Trend
+            if current['SMA50'] > current['SMA200']:
+                trend = 'Uptrend'
+            elif current['SMA50'] < current['SMA200']:
+                trend = 'Downtrend'
+            else:
+                trend = 'Sideways'
+
+            # Volatility
+            if current['Volatility'] > data['Volatility'].quantile(0.75):
+                volatility = 'High'
+            elif current['Volatility'] < data['Volatility'].quantile(0.25):
+                volatility = 'Low'
+            else:
+                volatility = 'Medium'
+
+            # Volume
+            if current['Volume'] > current['Volume_MA'] * 1.5:
+                volume = 'High'
+            elif current['Volume'] < current['Volume_MA'] * 0.5:
+                volume = 'Low'
+            else:
+                volume = 'Normal'
+
+            # Momentum
+            if current['Momentum'] > 0.05:
+                momentum = 'Strong'
+            elif current['Momentum'] < -0.05:
+                momentum = 'Weak'
+            else:
+                momentum = 'Neutral'
+
+            condition = f"{trend}-{volatility}_Volatility-{volume}_Volume-{momentum}_Momentum"
+            conditions.append(condition)
+
+        return pd.Series(conditions, index=data.index)        
 
     def calculate_returns(self, data: pd.DataFrame, signals: pd.Series) -> Optional[pd.DataFrame]:
         """Calculate returns for the backtest."""
@@ -450,6 +502,9 @@ class EnhancedBacktest:
         except Exception as e:
             logger.error(f"Error in Monte Carlo simulation: {e}")
             raise
+
+
+
 
     def _generate_synthetic_data(self) -> pd.DataFrame:
         """
