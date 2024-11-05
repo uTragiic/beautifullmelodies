@@ -13,7 +13,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def add_spy_to_db(db_path: str, years_of_data: int = 5):
+def add_spy_to_db(db_path: str, years_of_data: int = 14):
     """
     Add SPY data to the specified database.
     

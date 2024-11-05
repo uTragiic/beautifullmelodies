@@ -118,40 +118,37 @@ class DatabaseSetup:
             return ['SPY', 'DIA', 'IWM', 'GE', 'F', 'BAC', 'WFC', 'XOM', 'CVX', 'PFE']
 
     def validate_symbols(self, symbols: List[str]) -> List[str]:
-        """
-        Validate symbols have sufficient trading data available.
-        """
         valid_symbols = []
         total = len(symbols)
         
         for i, symbol in enumerate(symbols, 1):
             try:
                 ticker = yf.Ticker(symbol)
-                # Try to get recent price data
                 df = ticker.history(period='1mo')
-                if df.empty:
+                if df.empty or 'Close' not in df.columns:
                     logger.warning(f"No price data for {symbol}")
                     continue
 
-                # Check if the latest volume and price meet criteria
+                # Ensure the column names are lowercase for consistency
+                df.columns = [col.lower() for col in df.columns]
+
                 latest = df.iloc[-1]
-                if (latest['Volume'] > 50000 and latest['close'] > 0.1):
+                if (latest['volume'] > 50000 and latest['close'] > 0.1):
                     valid_symbols.append(symbol)
                 else:
                     logger.info(f"Symbol {symbol} does not meet volume or price criteria.")
-
+                
                 if i % 100 == 0:
                     logger.info(f"Validated {i}/{total} symbols")
                     
-                # Rate limiting
                 time.sleep(0.1)
-                
             except Exception as e:
                 logger.warning(f"Error validating {symbol}: {e}")
                 continue
 
         logger.info(f"Found {len(valid_symbols)} valid symbols out of {total}")
         return valid_symbols
+    
 
     def create_symbol_table(self, symbol: str):
         """Create a new table for a trading symbol using market_data_template"""
@@ -287,7 +284,7 @@ class DatabaseSetup:
             logger.error(f"Error loading market conditions: {e}")
             raise
 
-def setup_database_with_nyse_data(start_date: str = '2020-01-01'):
+def setup_database_with_nyse_data(start_date: str = '2010-01-01'):
     """
     Complete database setup process including fetching NYSE symbols and historical data
     """
@@ -344,7 +341,7 @@ def setup_database_with_nyse_data(start_date: str = '2020-01-01'):
 if __name__ == "__main__":
     try:
         # Set start date for historical data
-        start_date = '2020-01-01'  # Adjust as needed
+        start_date = '2010-01-01'  # Adjust as needed
         
         # Run complete setup
         setup_database_with_nyse_data(start_date)
