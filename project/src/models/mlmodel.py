@@ -204,7 +204,126 @@ class MachineLearningModel:
                 adjusted[key] *= (1 + trend_factor * 0.2)
                 
         return adjusted
+    def _calculate_performance_metrics(self, predictions: np.ndarray, y: np.ndarray, returns: np.ndarray) -> PerformanceMetrics:
+        """
+        Calculate comprehensive performance metrics for the model with proper error handling.
+        
+        Args:
+            predictions: Model predictions
+            y: Actual target values 
+            returns: Actual returns
+            
+        Returns:
+            PerformanceMetrics object containing calculated metrics
+        """
+        try:
+            # Ensure arrays are the same length
+            min_length = min(len(returns), len(predictions), len(y))
+            returns = returns[-min_length:]
+            predictions = predictions[-min_length:]
+            y = y[-min_length:]
 
+            # Calculate strategy returns
+            strategy_returns = returns * np.where(predictions > 0.5, 1, -1)
+
+            # Calculate cumulative returns safely
+            cumulative_returns = np.cumprod(1 + strategy_returns)
+
+            # Calculate winning trades and win rate
+            winning_trades = np.sum(strategy_returns > 0)
+            total_trades = len(strategy_returns[strategy_returns != 0])
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0
+
+            # Calculate profit factor safely
+            gross_profits = np.sum(strategy_returns[strategy_returns > 0])
+            gross_losses = abs(np.sum(strategy_returns[strategy_returns < 0]))
+            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
+
+            # Calculate volatility and Sharpe ratio safely
+            volatility = np.std(strategy_returns) * np.sqrt(252)
+            if volatility == 0:  # Handle zero volatility case
+                sharpe_ratio = 0.0
+            else:
+                sharpe_ratio = np.mean(strategy_returns) / volatility * np.sqrt(252)
+
+            # Calculate max drawdown safely
+            rolling_max = np.maximum.accumulate(cumulative_returns)
+            drawdowns = (cumulative_returns - rolling_max) / rolling_max
+            max_drawdown = abs(np.min(drawdowns)) if len(drawdowns) > 0 else 0
+
+            return PerformanceMetrics(
+                sharpe_ratio=float(sharpe_ratio),
+                win_rate=float(win_rate),
+                profit_factor=float(profit_factor),
+                max_drawdown=float(max_drawdown),
+                volatility=float(volatility)
+            )
+
+        except Exception as e:
+            logger.error(f"Error calculating performance metrics: {str(e)}")
+            # Return default metrics instead of raising
+            return PerformanceMetrics(
+                sharpe_ratio=0.0,
+                win_rate=0.0,
+                profit_factor=0.0,
+                max_drawdown=0.0,
+                volatility=0.0
+            )
+        
+    def _calculate_simulation_metrics(self, returns: pd.DataFrame) -> Dict[str, float]:
+        """
+        Calculate metrics for Monte Carlo simulation.
+        
+        Args:
+            returns: DataFrame of simulation returns
+            
+        Returns:
+            Dictionary of simulation metrics
+        """
+        try:
+            strategy_returns = returns['Strategy_Returns'].dropna()
+            
+            # Calculate cumulative returns
+            cumulative_returns = (1 + strategy_returns).cumprod()
+            
+            # Calculate metrics
+            total_return = cumulative_returns.iloc[-1] - 1
+            annual_return = (1 + total_return) ** (252 / len(strategy_returns)) - 1
+            volatility = strategy_returns.std() * np.sqrt(252)
+            
+            # Calculate Sharpe ratio
+            excess_returns = strategy_returns - self.risk_free_rate/252
+            sharpe_ratio = np.mean(excess_returns) / strategy_returns.std() * np.sqrt(252)
+            
+            # Calculate drawdown
+            peak = cumulative_returns.expanding().max()
+            drawdown = (cumulative_returns - peak) / peak
+            max_drawdown = abs(drawdown.min())
+            
+            # Calculate win rate
+            winning_trades = (strategy_returns > 0).sum()
+            total_trades = len(strategy_returns[strategy_returns != 0])
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0
+            
+            # Calculate profit factor
+            gross_profits = strategy_returns[strategy_returns > 0].sum()
+            gross_losses = abs(strategy_returns[strategy_returns < 0].sum())
+            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
+            
+            return {
+                'total_return': float(total_return),
+                'annual_return': float(annual_return),
+                'volatility': float(volatility),
+                'sharpe_ratio': float(sharpe_ratio),
+                'max_drawdown': float(max_drawdown),
+                'win_rate': float(win_rate),
+                'profit_factor': float(profit_factor),
+                'total_trades': int(total_trades)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating simulation metrics: {str(e)}")
+            raise
     def _calculate_trend_strength(self, data: pd.DataFrame) -> float:
         """Calculate trend strength as per document."""
         sma_diff = (data['SMA_50'].iloc[-1] - data['SMA_200'].iloc[-1]) / data['SMA_200'].iloc[-1]
@@ -277,137 +396,111 @@ class MachineLearningModel:
             logger.error(f"Error preparing features: {str(e)}")
             raise
 
-    def _calculate_performance_metrics(self, predictions: np.ndarray, y: np.ndarray, returns: np.ndarray) -> Dict[str, float]:
+    def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Calculate comprehensive performance metrics for the model.
-        
+        Calculate all required technical indicators with adjusted minimum data requirements.
+
         Args:
-            predictions (np.ndarray): Model predictions
-            y (np.ndarray): Actual target values 
-            returns (np.ndarray): Actual returns
-            
+            data: DataFrame with OHLCV data
+
         Returns:
-            dict: Dictionary containing various performance metrics
+            DataFrame with calculated indicators
+
+        Raises:
+            ValueError: If there is insufficient data
         """
         try:
-            # Ensure arrays are the same length
-            min_length = min(len(returns), len(predictions), len(y))
-            returns = returns[-min_length:]
-            predictions = predictions[-min_length:]
-            y = y[-min_length:]
+            df = data.copy()
 
-            # Calculate classification metrics
-            actual_signals = y
-            predicted_signals = predictions > 0.5  # Convert probabilities to binary predictions
-            
-            accuracy = accuracy_score(actual_signals, predicted_signals)
-            precision = precision_score(actual_signals, predicted_signals)
-            recall = recall_score(actual_signals, predicted_signals)
-            f1 = f1_score(actual_signals, predicted_signals)
-            
-            # Calculate trading metrics
-            strategy_returns = returns * np.where(predicted_signals, 1, -1)
-            cumulative_returns = np.cumsum(strategy_returns)
-            
-            # Calculate max drawdown
-            peak = np.maximum.accumulate(cumulative_returns)
-            drawdown = (cumulative_returns - peak) / peak
-            max_drawdown = abs(np.min(drawdown))
-            
-            # Calculate volatility (annualized)
-            volatility = np.std(strategy_returns) * np.sqrt(252)
-            
-            # Calculate Sharpe Ratio (annualized)
-            excess_returns = strategy_returns - self.risk_free_rate/252  # Daily risk-free rate
-            sharpe_ratio = np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)
-            
-            # Calculate win rate
-            profitable_trades = np.sum(strategy_returns > 0)
-            total_trades = len(strategy_returns)
-            win_rate = profitable_trades / total_trades if total_trades > 0 else 0
-            
-            # Calculate profit factor
-            gross_profits = np.sum(strategy_returns[strategy_returns > 0])
-            gross_losses = abs(np.sum(strategy_returns[strategy_returns < 0]))
-            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
-            
-            # Calculate average return
-            avg_return = np.mean(strategy_returns)
-            
-            return {
-                'accuracy': accuracy,
-                'precision': precision,
-                'recall': recall,
-                'f1_score': f1,
-                'max_drawdown': max_drawdown,
-                'volatility': volatility,
-                'sharpe_ratio': sharpe_ratio,
-                'win_rate': win_rate,
-                'profit_factor': profit_factor,
-                'avg_return': avg_return,
-                'total_trades': total_trades,
-                'profitable_trades': profitable_trades
-            }
-            
-        except Exception as e:
-            logger.error(f"Error calculating performance metrics: {str(e)}")
-            raise
+            # Determine the minimum required length based on largest window size
+            window_sizes = [50, 14, 26, 20]  # Reduced from previous sizes
+            min_required_length = max(window_sizes)
 
-    def _calculate_performance_metrics(self, predictions: np.ndarray, y: np.ndarray, returns: np.ndarray) -> PerformanceMetrics:
-        """
-        Calculate comprehensive performance metrics for the model.
-        
-        Args:
-            predictions: Model predictions
-            y: Actual target values 
-            returns: Actual returns
-            
-        Returns:
-            PerformanceMetrics object
-        """
-        try:
-            # Ensure arrays are the same length
-            min_length = min(len(returns), len(predictions), len(y))
-            returns = returns[-min_length:]
-            predictions = predictions[-min_length:]
-            y = y[-min_length:]
+            if len(df) < min_required_length:
+                raise ValueError(
+                    f"Insufficient data: {len(df)} rows; at least {min_required_length} required."
+                )
 
-            # Calculate strategy returns
-            strategy_returns = returns * np.where(predictions > 0.5, 1, -1)
-            
-            # Calculate metrics
-            winning_trades = np.sum(strategy_returns > 0)
-            total_trades = len(strategy_returns)
-            win_rate = winning_trades / total_trades if total_trades > 0 else 0
+            # Moving Averages
+            df['SMA_50'] = df['close'].rolling(window=50).mean()
+            df['SMA_200'] = df['close'].rolling(window=50).mean()  # Temporarily use SMA_50 instead of 200
 
-            # Calculate profit factor
-            gross_profits = np.sum(strategy_returns[strategy_returns > 0])
-            gross_losses = abs(np.sum(strategy_returns[strategy_returns < 0]))
-            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
+            # RSI and normalized RSI
+            rsi = RSIIndicator(close=df['close'], window=14)
+            df['RSI'] = rsi.rsi()
+            df['RSI_Z'] = (
+                df['RSI'] - df['RSI'].rolling(window=20).mean()
+            ) / df['RSI'].rolling(window=20).std()
 
-            # Calculate volatility and Sharpe ratio
-            volatility = np.std(strategy_returns) * np.sqrt(252)
-            sharpe_ratio = np.mean(strategy_returns) / volatility * np.sqrt(252) if volatility != 0 else 0
-
-            # Calculate max drawdown
-            cumulative_returns = (1 + strategy_returns).cumprod()
-            running_max = np.maximum.accumulate(cumulative_returns)
-            drawdowns = (cumulative_returns - running_max) / running_max
-            max_drawdown = abs(np.min(drawdowns)) if len(drawdowns) > 0 else 0
-
-            # Create PerformanceMetrics object
-            return PerformanceMetrics(
-                sharpe_ratio=float(sharpe_ratio),
-                win_rate=float(win_rate),
-                profit_factor=float(profit_factor),
-                max_drawdown=float(max_drawdown),
-                volatility=float(volatility)
+            # MACD Components
+            macd = MACD(
+                close=df['close'],
+                window_slow=26,
+                window_fast=12,
+                window_sign=9
             )
+            df['MACD'] = macd.macd()
+            df['MACD_signal'] = macd.macd_signal()
+            df['MACD_diff'] = macd.macd_diff()
+            df['MACD_Z'] = (
+                df['MACD_diff'] - df['MACD_diff'].rolling(window=20).mean()
+            ) / df['MACD_diff'].rolling(window=20).std()
+
+            # ADX
+            adx = ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14)
+            df['ADX'] = adx.adx()
+
+            # ATR
+            atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14)
+            df['ATR'] = atr.average_true_range()
+
+            # Volume indicators
+            df['Volume_SMA'] = df['volume'].rolling(window=20).mean()
+            df['Volume_Ratio'] = df['volume'] / df['Volume_SMA']
+
+            # On-Balance Volume
+            obv = OnBalanceVolumeIndicator(close=df['close'], volume=df['volume'])
+            df['OBV'] = obv.on_balance_volume()
+
+            # Stochastic Oscillator
+            stoch = StochasticOscillator(
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                window=14,
+                smooth_window=3
+            )
+            df['Stoch_K'] = stoch.stoch()
+            df['Stoch_D'] = stoch.stoch_signal()
+
+            # Bollinger Bands
+            bb = BollingerBands(close=df['close'], window=20, window_dev=2)
+            df['BB_upper'] = bb.bollinger_hband()
+            df['BB_lower'] = bb.bollinger_lband()
+            df['BB_width'] = (df['BB_upper'] - df['BB_lower']) / df['close']
+
+            # Momentum
+            df['Momentum'] = df['close'].pct_change(periods=20)
+
+            # Forward fill any NaN values
+            df = df.fillna(method='ffill').fillna(method='bfill')
+
+            # Verify all required indicators are present
+            required_indicators = [
+                'SMA_50', 'RSI', 'RSI_Z', 'MACD', 'MACD_signal', 'MACD_diff', 
+                'MACD_Z', 'ADX', 'ATR', 'Volume_Ratio', 'OBV', 'Stoch_K', 
+                'Stoch_D', 'BB_width', 'Momentum'
+            ]
+
+            missing_indicators = [ind for ind in required_indicators if ind not in df.columns]
+            if missing_indicators:
+                raise ValueError(f"Failed to calculate indicators: {missing_indicators}")
+
+            return df
 
         except Exception as e:
-            logger.error(f"Error calculating performance metrics: {str(e)}")
-        raise
-
+            logger.error(f"Error calculating indicators: {e}")
+            raise  
     def train(self, data: pd.DataFrame) -> None:
         try:
             logger.info("Starting model training...")

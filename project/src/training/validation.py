@@ -180,32 +180,36 @@ class ModelValidator:
         out_sample_metrics = backtester.calculate_performance_metrics(out_sample)
         
         return in_sample_metrics, out_sample_metrics
-            
+                
     def _calculate_validation_metrics(self,
-                                     performance_metrics: PerformanceMetrics,
-                                     monte_carlo_results: pd.DataFrame,
-                                     overfitting_scores: Dict[str, float]) -> ValidationMetrics:
+                                performance_metrics: dict,
+                                monte_carlo_results: pd.DataFrame,
+                                overfitting_scores: Dict[str, float]) -> Dict[str, float]:
         """Calculate comprehensive validation metrics."""
-        # Calculate stability and regime consistency scores
-        stability_score = 1 - overfitting_scores.get('stability_score', 0)
-        regime_consistency = 1 - overfitting_scores.get('regime_score', 0)
-        
-        return ValidationMetrics(
-            sharpe_ratio=performance_metrics.sharpe_ratio,
-            sortino_ratio=monte_carlo_results['sortino_ratio'].mean(),
-            win_rate=performance_metrics.win_rate,
-            profit_factor=performance_metrics.profit_factor,
-            max_drawdown=performance_metrics.max_drawdown,
-            alpha=monte_carlo_results['alpha'].mean(),
-            beta=monte_carlo_results['beta'].mean(),
-            information_ratio=monte_carlo_results['information_ratio'].mean(),
-            calmar_ratio=monte_carlo_results['calmar_ratio'].mean(),
-            recovery_factor=monte_carlo_results['recovery_factor'].mean(),
-            stability_score=stability_score,
-            regime_consistency=regime_consistency,
-            overfitting_score=overfitting_scores.get('final_score', 0)
-        )
+        try:
+            # Calculate stability and regime consistency scores
+            stability_score = 1 - overfitting_scores.get('stability_score', 0)
+            regime_consistency = 1 - overfitting_scores.get('regime_score', 0)
             
+            return {
+                'sharpe_ratio': performance_metrics['sharpe_ratio'],
+                'sortino_ratio': monte_carlo_results['sortino_ratio'].mean(),
+                'win_rate': performance_metrics['win_rate'],
+                'profit_factor': performance_metrics['profit_factor'],
+                'max_drawdown': performance_metrics['max_drawdown'],
+                'alpha': monte_carlo_results['alpha'].mean(),
+                'beta': monte_carlo_results['beta'].mean(),
+                'information_ratio': monte_carlo_results['information_ratio'].mean(),
+                'calmar_ratio': monte_carlo_results['calmar_ratio'].mean(),
+                'recovery_factor': monte_carlo_results['recovery_factor'].mean(),
+                'stability_score': stability_score,
+                'regime_consistency': regime_consistency,
+                'overfitting_score': overfitting_scores.get('final_score', 0)
+            }
+        except Exception as e:
+            self.logger.error(f"Error calculating validation metrics: {str(e)}")
+            return {}
+                
     def _analyze_regime_performance(self,
                                     data: pd.DataFrame,
                                     model: Any) -> Dict[str, Dict[str, float]]:

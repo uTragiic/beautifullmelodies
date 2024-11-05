@@ -4,7 +4,8 @@ from typing import Dict, List, Optional, Tuple, Any, Callable
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
-
+import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 # Third-Party Imports
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ from ta.volatility import AverageTrueRange, BollingerBands
 from ta.volume import OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
 # Local Imports
 from ..core.performance_metrics import PerformanceMetrics
+
 from ..core.types import MarketRegime
 from ..utils.validation import validate_dataframe
 import config
@@ -42,6 +44,8 @@ class BacktestConfig:
     early_stopping_patience: int = 10
     min_performance_threshold: float = 0.5
     max_correlation_threshold: float = 0.7
+    risk_free_rate: float = 0.02  # 2% annual risk-free rate
+
 class Backtest:
     """
     Enhanced backtesting system with walk-forward optimization
@@ -52,6 +56,7 @@ class Backtest:
         """
         Initialize the backtesting system.
         """
+        
         try:
             # Validate data
             if not isinstance(data, pd.DataFrame):
@@ -104,7 +109,7 @@ class Backtest:
             self.data = data
             self.initial_capital = initial_capital
             self.results = None
-            
+            self.config = config or BacktestConfig()
             # Use already calculated indicators if they exist, otherwise calculate them
             required_indicators = [
                 'SMA_50', 'SMA_200', 'RSI', 'RSI_Z', 'MACD', 'MACD_signal',
@@ -124,7 +129,325 @@ class Backtest:
         except Exception as e:
             logger.error(f"Error initializing backtest system: {e}")
             raise
+    def _calculate_simulation_metrics(self, returns: pd.DataFrame) -> Dict[str, float]:
+        """
+        Calculate metrics for Monte Carlo simulation.
+        
+        Args:
+            returns: DataFrame of simulation returns
+            
+        Returns:
+            Dictionary of simulation metrics
+        """
+        try:
+            strategy_returns = returns['Strategy_Returns'].dropna()
+            
+            # Calculate cumulative returns
+            cumulative_returns = (1 + strategy_returns).cumprod()
+            
+            # Calculate metrics
+            total_return = cumulative_returns.iloc[-1] - 1
+            annual_return = (1 + total_return) ** (252 / len(strategy_returns)) - 1
+            volatility = strategy_returns.std() * np.sqrt(252)
+            
+            # Calculate Sharpe ratio
+            risk_free_rate: float = 0.02
+            excess_returns = strategy_returns - risk_free_rate/252
+            sharpe_ratio = np.mean(excess_returns) / strategy_returns.std() * np.sqrt(252)
+            
+            # Calculate drawdown
+            peak = cumulative_returns.expanding().max()
+            drawdown = (cumulative_returns - peak) / peak
+            max_drawdown = abs(drawdown.min())
+            
+            # Calculate win rate
+            winning_trades = (strategy_returns > 0).sum()
+            total_trades = len(strategy_returns[strategy_returns != 0])
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0
+            
+            # Calculate profit factor
+            gross_profits = strategy_returns[strategy_returns > 0].sum()
+            gross_losses = abs(strategy_returns[strategy_returns < 0].sum())
+            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
+            
+            return {
+                'total_return': float(total_return),
+                'annual_return': float(annual_return),
+                'volatility': float(volatility),
+                'sharpe_ratio': float(sharpe_ratio),
+                'max_drawdown': float(max_drawdown),
+                'win_rate': float(win_rate),
+                'profit_factor': float(profit_factor),
+                'total_trades': int(total_trades)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating simulation metrics: {e}")
+            return {
+                'total_return': 0.0,
+                'annual_return': 0.0,
+                'volatility': 0.0,
+                'sharpe_ratio': 0.0,
+                'max_drawdown': 0.0,
+                'win_rate': 0.0,
+                'profit_factor': 0.0,
+                'total_trades': 0
+            }
+    
+    def calculate_sharpe_ratio(self, excess_returns: np.ndarray, 
+                             strategy_returns: np.ndarray) -> float:
+        """
+        Calculate Sharpe ratio with safety checks for zero division
+        """
+        if len(strategy_returns) == 0:
+            return 0.0
+            
+        std = strategy_returns.std()
+        if std == 0:
+            self.logger.warning("Standard deviation is zero, returning 0 for Sharpe ratio")
+            return 0.0
+            
+        return np.mean(excess_returns) / std * np.sqrt(252)
 
+    def validate_data(self, data: np.ndarray) -> bool:
+        """
+        Validate if data meets minimum requirements
+        """
+        if len(data) < self.min_required_rows:
+            self.logger.error(
+                f"Insufficient data: {len(data)} rows; at least {self.min_required_rows} required"
+            )
+            return False
+        return True
+    def _calculate_monte_carlo_metrics(self, returns: pd.DataFrame) -> PerformanceMetrics:
+        """Calculate comprehensive performance metrics for Monte Carlo simulation."""
+        try:
+            strategy_returns = returns['Strategy_Returns'].dropna()
+            
+            # Calculate basic metrics
+            total_return = (1 + strategy_returns).prod() - 1
+            annual_return = (1 + total_return) ** (252 / len(strategy_returns)) - 1
+            volatility = strategy_returns.std() * np.sqrt(252)
+            
+            # Calculate drawdown
+            cum_returns = (1 + strategy_returns).cumprod()
+            peak = cum_returns.expanding(min_periods=1).max()
+            drawdown = (cum_returns - peak) / peak
+            max_drawdown = abs(drawdown.min()) if len(drawdown) > 0 else 0
+            
+            # Calculate win rate
+            winning_trades = (strategy_returns > 0).sum()
+            total_trades = len(strategy_returns[strategy_returns != 0])
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0
+            
+            # Calculate profit factor
+            gross_profits = strategy_returns[strategy_returns > 0].sum()
+            gross_losses = abs(strategy_returns[strategy_returns < 0].sum())
+            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
+            
+            # Calculate risk-adjusted returns
+            excess_returns = strategy_returns - (self.config.risk_free_rate / 252)
+            sharpe_ratio = np.sqrt(252) * excess_returns.mean() / strategy_returns.std() if strategy_returns.std() != 0 else 0
+            
+            # Calculate additional metrics
+            downside_returns = strategy_returns[strategy_returns < 0]
+            downside_std = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0
+            sortino_ratio = np.sqrt(252) * excess_returns.mean() / downside_std if downside_std != 0 else 0
+            calmar_ratio = annual_return / max_drawdown if max_drawdown != 0 else float('inf')
+            
+            # Create and return PerformanceMetrics object
+            return PerformanceMetrics(
+                sharpe_ratio=sharpe_ratio,
+                win_rate=win_rate,
+                profit_factor=profit_factor,
+                max_drawdown=max_drawdown,
+                volatility=volatility,
+                total_return=total_return,
+                annual_return=annual_return,
+                sortino_ratio=sortino_ratio,
+                calmar_ratio=calmar_ratio,
+                total_trades=total_trades,
+                alpha=excess_returns.mean() * 252,
+                beta=self._calculate_beta(strategy_returns),
+                information_ratio=self._calculate_information_ratio(strategy_returns),
+                recovery_factor=abs(total_return / max_drawdown) if max_drawdown != 0 else float('inf')
+            )
+            
+        except Exception as e:
+            logger.error(f"Error calculating Monte Carlo metrics: {e}")
+            raise
+    def _calculate_beta(self, returns: pd.Series) -> float:
+        """Calculate beta relative to market returns."""
+        try:
+            market_returns = self.data['close'].pct_change().dropna()
+            if len(market_returns) != len(returns):
+                market_returns = market_returns.iloc[-len(returns):]
+            
+            covariance = returns.cov(market_returns)
+            market_variance = market_returns.var()
+            
+            return covariance / market_variance if market_variance != 0 else 1.0
+            
+        except Exception:
+            return 1.0
+
+    def calculate_trading_statistics(self) -> Dict[str, float]:
+        """
+        Calculate comprehensive trading statistics from backtest results.
+        
+        Returns:
+            Dictionary containing various trading statistics
+        """
+        try:
+            if self.results is None:
+                raise ValueError("Backtest hasn't been run yet. Call run_backtest() first.")
+                
+            stats = {}
+            returns = self.results['Strategy_Returns'].dropna()
+            
+            # Basic trade statistics
+            trades = self.results[self.results['Signal'] != 0]
+            stats['total_trades'] = len(trades)
+            
+            if stats['total_trades'] > 0:
+                # Win rate and trade metrics
+                winning_trades = returns[returns > 0]
+                losing_trades = returns[returns < 0]
+                
+                stats['win_rate'] = len(winning_trades) / stats['total_trades']
+                stats['avg_win'] = winning_trades.mean() if len(winning_trades) > 0 else 0
+                stats['avg_loss'] = losing_trades.mean() if len(losing_trades) > 0 else 0
+                
+                # Calculate profit factor
+                gross_profits = winning_trades.sum()
+                gross_losses = abs(losing_trades.sum())
+                stats['profit_factor'] = gross_profits / gross_losses if gross_losses != 0 else float('inf')
+                
+                # Trade duration
+                trade_durations = []
+                current_trade_start = None
+                
+                for idx, row in self.results.iterrows():
+                    if row['Signal'] != 0 and current_trade_start is None:
+                        current_trade_start = idx
+                    elif row['Signal'] == 0 and current_trade_start is not None:
+                        trade_duration = (idx - current_trade_start).days
+                        trade_durations.append(trade_duration)
+                        current_trade_start = None
+                
+                stats['avg_trade_duration'] = np.mean(trade_durations) if trade_durations else 0
+                
+                # Consecutive wins/losses
+                consecutive_wins = 0
+                consecutive_losses = 0
+                max_consecutive_wins = 0
+                max_consecutive_losses = 0
+                current_streak = 0
+                
+                for ret in returns:
+                    if ret > 0:
+                        if current_streak >= 0:
+                            current_streak += 1
+                        else:
+                            current_streak = 1
+                        max_consecutive_wins = max(max_consecutive_wins, current_streak)
+                    elif ret < 0:
+                        if current_streak <= 0:
+                            current_streak -= 1
+                        else:
+                            current_streak = -1
+                        max_consecutive_losses = max(max_consecutive_losses, abs(current_streak))
+                
+                stats['max_consecutive_wins'] = max_consecutive_wins
+                stats['max_consecutive_losses'] = max_consecutive_losses
+                
+                # Calculate recovery factor
+                cumulative_returns = (1 + returns).cumprod()
+                max_drawdown = self.results['Drawdown'].max()
+                total_return = cumulative_returns.iloc[-1] - 1
+                
+                stats['recovery_factor'] = abs(total_return / max_drawdown) if max_drawdown != 0 else float('inf')
+                
+                # Risk-adjusted returns
+                stats['sharpe_ratio'] = returns.mean() / returns.std() * np.sqrt(252) if returns.std() != 0 else 0
+                
+                # Downside volatility
+                downside_returns = returns[returns < 0]
+                stats['downside_volatility'] = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0
+                
+                # Calculate Sortino ratio
+                stats['sortino_ratio'] = (returns.mean() * 252) / stats['downside_volatility'] if stats['downside_volatility'] != 0 else 0
+                
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error calculating trading statistics: {e}")
+            raise
+    def calculate_market_condition_statistics(self, backtest_results: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate performance statistics grouped by market conditions.
+        
+        Args:
+            backtest_results: DataFrame containing backtest results with Market_Condition column
+            
+        Returns:
+            DataFrame containing statistics for each market condition
+        """
+        try:
+            # First group by market condition
+            grouped = backtest_results.groupby('Market_Condition')
+            
+            # Initialize results dictionary
+            stats_dict = {}
+            
+            # Calculate metrics for each market condition
+            for condition in grouped.groups.keys():
+                condition_data = backtest_results[backtest_results['Market_Condition'] == condition]
+                
+                # Calculate returns statistics
+                returns = condition_data['Strategy_Returns']
+                if len(returns) > 0:
+                    avg_return = returns.mean() * 252  # Annualized
+                    std_dev = returns.std() * np.sqrt(252)  # Annualized
+                    
+                    # Calculate Drawdown
+                    cum_returns = (1 + returns).cumprod()
+                    running_max = cum_returns.expanding().max()
+                    drawdown = (cum_returns - running_max) / running_max
+                    max_drawdown = abs(drawdown.min()) if len(drawdown) > 0 else 0
+                    
+                    # Calculate win rate
+                    win_rate = (returns > 0).mean()
+                    
+                    # Store metrics
+                    stats_dict[condition] = {
+                        'Avg_Return': avg_return,
+                        'Std_Dev': std_dev,
+                        'Count': len(returns),
+                        'Win_Rate': win_rate,
+                        'Max_Drawdown': max_drawdown
+                    }
+                    
+                    # Calculate Sharpe Ratio if std_dev is not zero
+                    if std_dev != 0:
+                        stats_dict[condition]['Sharpe_Ratio'] = avg_return / std_dev
+                    else:
+                        stats_dict[condition]['Sharpe_Ratio'] = np.nan
+                
+            # Convert dictionary to DataFrame
+            market_condition_stats = pd.DataFrame.from_dict(stats_dict, orient='index')
+            
+            # Ensure all required columns exist
+            required_columns = ['Avg_Return', 'Std_Dev', 'Count', 'Win_Rate', 'Max_Drawdown', 'Sharpe_Ratio']
+            for col in required_columns:
+                if col not in market_condition_stats.columns:
+                    market_condition_stats[col] = np.nan
+                    
+            return market_condition_stats
+            
+        except Exception as e:
+            logger.error(f"Error calculating market condition statistics: {e}")
+            raise
     def _calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate all required technical indicators consistently with other classes.
@@ -220,59 +543,63 @@ class Backtest:
             strategy: Trading strategy to test
             n_splits: Number of time series splits
             n_jobs: Number of parallel jobs
-            
+                
         Returns:
             DataFrame containing backtest results
         """
         try:
             # Validate data length
             data_length = len(self.data)
-            min_train_size = 50  # Minimum training size
-            min_test_size = 20   # Minimum test size
+            min_train_size = 200  # Minimum training size
+            min_test_size = 50    # Minimum test size
+            
+            if data_length < (min_train_size + min_test_size):
+                raise ValueError(
+                    f"Insufficient data for backtesting: {data_length} points, "
+                    f"need at least {min_train_size + min_test_size}"
+                )
 
-            # Check if data is sufficient for the desired number of splits
-            if data_length < (min_train_size + min_test_size) * n_splits:
-                raise ValueError(f"Insufficient data for {n_splits} splits with train size {min_train_size} and test size {min_test_size}")
-
-            # Initialize TimeSeriesSplit without test_size
-            tscv = TimeSeriesSplit(n_splits=n_splits)
+            # Calculate split sizes
+            total_size = min_train_size + min_test_size
+            split_size = total_size // n_splits
+            
+            # Initialize time series splits
+            tscv = TimeSeriesSplit(
+                n_splits=n_splits,
+                test_size=split_size,
+                gap=0
+            )
 
             # Run parallel walk-forward optimization
-            with ThreadPoolExecutor(max_workers=n_jobs if n_jobs > 0 else None) as executor:
-                futures = []
-                for train_idx, test_idx in tscv.split(self.data):
-                    # Ensure test set meets minimum size
-                    if len(test_idx) >= min_test_size and len(train_idx) >= min_train_size:
-                        future = executor.submit(
-                            self._run_single_split,
-                            train_idx,
-                            test_idx,
-                            strategy
-                        )
-                        futures.append(future)
+            all_results = []
+            for train_idx, test_idx in tscv.split(self.data):
+                if len(train_idx) < min_train_size or len(test_idx) < min_test_size:
+                    continue
+                    
+                try:
+                    result = self._run_single_split(
+                        train_idx, 
+                        test_idx,
+                        strategy
+                    )
+                    if result is not None and not result.empty:
+                        all_results.append(result)
+                except Exception as e:
+                    logger.error(f"Error in split execution: {str(e)}")
+                    continue
 
-                # Collect results
-                all_results = []
-                for future in futures:
-                    try:
-                        result = future.result()
-                        if result is not None and not result.empty:
-                            all_results.append(result)
-                    except Exception as e:
-                        logger.error(f"Error in split execution: {e}")
-                        continue
+            # Ensure we have valid results
+            if not all_results:
+                raise ValueError("No valid results from any split")
 
-                if not all_results:
-                    raise ValueError("No valid results from any split")
-
-                # Combine results
-                self.results = pd.concat(all_results)
-                return self.results
-
+            # Combine results and store
+            self.results = pd.concat(all_results)
+            
+            return self.results
+            
         except Exception as e:
-            logger.error(f"Error running backtest: {e}")
+            logger.error(f"Error running backtest: {str(e)}")
             raise
-
     
     def _run_walk_forward(self, strategy: Any) -> pd.DataFrame:
         """
@@ -301,31 +628,15 @@ class Backtest:
             logger.error(f"Error in walk-forward optimization: {e}")
             raise
 
-    def _run_single_split(self, 
-                        train_index: np.ndarray,
-                        test_index: np.ndarray,
-                        strategy: Any) -> pd.DataFrame:
-        """
-        Run backtest on a single train/test split.
-        
-        Args:
-            train_index: Training data indices (array-like)
-            test_index: Test data indices (array-like)
-            strategy: Trading strategy
-            
-        Returns:
-            DataFrame containing results for this split
-        """
+    def _run_single_split(self,
+                         train_index: np.ndarray,
+                         test_index: np.ndarray,
+                         strategy: Any) -> Optional[pd.DataFrame]:
+        """Run backtest on a single train/test split."""
         try:
             # Get train/test data
-            train_data = self.data.iloc[train_index]
-            test_data = self.data.iloc[test_index]
-            
-            # Validate split sizes
-            if len(train_data) < 50 or len(test_data) < 20:
-                raise ValueError(
-                    f"Insufficient split sizes - Train: {len(train_data)}, Test: {len(test_data)}"
-                )
+            train_data = self.data.iloc[train_index].copy()
+            test_data = self.data.iloc[test_index].copy()
             
             # Train strategy
             strategy.train(train_data)
@@ -341,15 +652,14 @@ class Backtest:
             
             if returns is not None:
                 returns['Market_Condition'] = market_conditions
-                logger.debug(f"Split completed - Train size: {len(train_data)}, Test size: {len(test_data)}")
                 return returns
-            else:
-                raise ValueError("No valid returns calculated")
                 
+            return None
+            
         except Exception as e:
-            logger.error(f"Error in single split: {e}")
-            raise
-
+            logger.error(f"Error in single split: {str(e)}")
+            return None
+    
     def _run_single_backtest(self, strategy: Any) -> pd.DataFrame:
         """
         Run a single backtest without walk-forward optimization.
@@ -378,228 +688,287 @@ class Backtest:
             raise
 
     def classify_market_conditions(self, data: pd.DataFrame) -> pd.Series:
-        # Calculate necessary indicators
-        data['SMA50'] = data['close'].rolling(window=50).mean()
-        data['SMA200'] = data['close'].rolling(window=200).mean()
-        data['Volatility'] = data['Returns'].rolling(window=20).std() * np.sqrt(252)
-        data['Volume_MA'] = data['Volume'].rolling(window=20).mean()
-        data['Momentum'] = data['close'].pct_change(periods=20)
-
-        conditions = []
-        for i in range(len(data)):
-            if i < 200:  # Not enough data for classification
-                conditions.append('Undefined')
-                continue
-
-            current = data.iloc[i]
+        """
+        Classify market conditions based on technical indicators.
+        
+        Args:
+            data: DataFrame containing market data
             
-            # Trend
-            if current['SMA50'] > current['SMA200']:
-                trend = 'Uptrend'
-            elif current['SMA50'] < current['SMA200']:
-                trend = 'Downtrend'
-            else:
-                trend = 'Sideways'
-
-            # Volatility
-            if current['Volatility'] > data['Volatility'].quantile(0.75):
-                volatility = 'High'
-            elif current['Volatility'] < data['Volatility'].quantile(0.25):
-                volatility = 'Low'
-            else:
-                volatility = 'Medium'
-
-            # Volume
-            if current['Volume'] > current['Volume_MA'] * 1.5:
-                volume = 'High'
-            elif current['Volume'] < current['Volume_MA'] * 0.5:
-                volume = 'Low'
-            else:
-                volume = 'Normal'
-
-            # Momentum
-            if current['Momentum'] > 0.05:
-                momentum = 'Strong'
-            elif current['Momentum'] < -0.05:
-                momentum = 'Weak'
-            else:
-                momentum = 'Neutral'
-
-            condition = f"{trend}-{volatility}_Volatility-{volume}_Volume-{momentum}_Momentum"
-            conditions.append(condition)
-
-        return pd.Series(conditions, index=data.index)        
-
-    def calculate_returns(self, data: pd.DataFrame, signals: pd.Series) -> Optional[pd.DataFrame]:
-        """Calculate returns for the backtest."""
+        Returns:
+            Series containing market condition labels
+        """
         try:
-            returns = pd.DataFrame(index=data.index)
-            returns['Price'] = data['close']
-            returns['Signal'] = signals
-            returns['Returns'] = np.log(data['close'] / data['close'].shift(1))
+            # Create a copy of the data to avoid SettingWithCopyWarning
+            df = data.copy()
             
-            # Handle first row
-            returns.loc[returns.index[0], 'Returns'] = 0
+            # Calculate returns first
+            df['Returns'] = df['close'].pct_change()
+            
+            # Calculate necessary indicators using proper DataFrame assignment
+            df.loc[:, 'SMA50'] = df['close'].rolling(window=50).mean()
+            df.loc[:, 'SMA200'] = df['close'].rolling(window=200).mean()
+            df.loc[:, 'Volatility'] = df['Returns'].rolling(window=20).std() * np.sqrt(252)
+            df.loc[:, 'Volume_MA'] = df['volume'].rolling(window=20).mean()
+            df.loc[:, 'Momentum'] = df['close'].pct_change(periods=20)
+
+            conditions = []
+            for i in range(len(df)):
+                if i < 200:  # Not enough data for classification
+                    conditions.append('Undefined')
+                    continue
+
+                current = df.iloc[i]
+                
+                # Trend
+                if current['SMA50'] > current['SMA200']:
+                    trend = 'Uptrend'
+                elif current['SMA50'] < current['SMA200']:
+                    trend = 'Downtrend'
+                else:
+                    trend = 'Sideways'
+
+                # Volatility
+                vol_quantiles = df['Volatility'].quantile([0.25, 0.75])
+                if current['Volatility'] > vol_quantiles[0.75]:
+                    volatility = 'High'
+                elif current['Volatility'] < vol_quantiles[0.25]:
+                    volatility = 'Low'
+                else:
+                    volatility = 'Medium'
+
+                # Volume
+                if current['volume'] > current['Volume_MA'] * 1.5:
+                    volume = 'High'
+                elif current['volume'] < current['Volume_MA'] * 0.5:
+                    volume = 'Low'
+                else:
+                    volume = 'Normal'
+
+                # Momentum
+                if current['Momentum'] > 0.05:
+                    momentum = 'Strong'
+                elif current['Momentum'] < -0.05:
+                    momentum = 'Weak'
+                else:
+                    momentum = 'Neutral'
+
+                condition = f"{trend}-{volatility}_Volatility-{volume}_Volume-{momentum}_Momentum"
+                conditions.append(condition)
+
+            return pd.Series(conditions, index=df.index)
+
+        except Exception as e:
+            logger.error(f"Error classifying market conditions: {e}")
+            raise    
+    def calculate_returns(self, data: pd.DataFrame, signals: pd.Series) -> pd.DataFrame:
+        """
+        Calculate returns based on signals.
+        
+        Args:
+            data: Market data DataFrame
+            signals: Trading signals
+            
+        Returns:
+            DataFrame containing calculated returns and metrics
+        """
+        try:
+            # Create a new DataFrame for returns
+            returns = pd.DataFrame(index=data.index)
+            
+            # Add required columns with proper DataFrame assignment
+            returns.loc[:, 'Price'] = data['close']
+            returns.loc[:, 'Signal'] = signals
+            returns.loc[:, 'Returns'] = data['close'].pct_change().fillna(0)
             
             # Calculate strategy returns
-            returns['Strategy_Returns'] = returns['Signal'].shift(1) * returns['Returns']
-            
-            # Handle first row
-            returns.loc[returns.index[0], 'Strategy_Returns'] = 0
+            returns.loc[:, 'Strategy_Returns'] = returns['Signal'].shift(1) * returns['Returns']
+            returns.loc[returns.index[0], 'Strategy_Returns'] = 0  # Set first row to 0
             
             # Calculate cumulative returns
-            returns['Cumulative_Returns'] = (1 + returns['Strategy_Returns']).cumprod()
+            returns.loc[:, 'Cumulative_Returns'] = (1 + returns['Strategy_Returns']).cumprod()
             
             # Calculate drawdown
-            peak = returns['Cumulative_Returns'].expanding().max()
-            returns['Drawdown'] = (returns['Cumulative_Returns'] - peak) / peak
+            rolling_max = returns['Cumulative_Returns'].expanding().max()
+            returns.loc[:, 'Drawdown'] = (returns['Cumulative_Returns'] - rolling_max) / rolling_max
             
-            # Validate results
-            if returns['Strategy_Returns'].isnull().all():
-                logger.warning("No valid strategy returns calculated")
-                return None
-                
             return returns
-            
+
         except Exception as e:
             logger.error(f"Error calculating returns: {e}")
-            return None
+            raise
 
-    def _run_monte_carlo(self,
-                        strategy: Any,
-                        n_simulations: int) -> pd.DataFrame:
+    def run_monte_carlo(self, 
+                       strategy: Any, 
+                       num_simulations: int = 1000,
+                       simulation_length: int = 252) -> pd.DataFrame:
         """
-        Run Monte Carlo simulations.
-
+        Run Monte Carlo simulation.
+        
         Args:
-            strategy: Trading strategy object
-            n_simulations: Number of simulations to run
-
+            strategy: Trading strategy to test
+            num_simulations: Number of simulations to run
+            simulation_length: Length of each simulation in days
+            
         Returns:
             DataFrame containing simulation results
         """
         try:
+            # Create empty list to store simulation results
             simulation_results = []
             
-            for i in range(n_simulations):
-                # Generate synthetic price data
-                synthetic_data = self._generate_synthetic_data()
-                
-                # Run backtest on synthetic data
-                signals = strategy.generate_signals(synthetic_data)
-                returns = self._calculate_returns(synthetic_data, signals)
-                
-                # Calculate performance metrics
-                metrics = self._calculate_simulation_metrics(returns)
-                metrics['simulation_id'] = i
-                simulation_results.append(metrics)
-                
-                if i % 100 == 0:
-                    logger.info(f"Completed {i} Monte Carlo simulations")
-
+            for i in range(num_simulations):
+                try:
+                    # Generate synthetic data
+                    synthetic_data = self._generate_synthetic_data(simulation_length)
+                    
+                    # Generate signals using strategy
+                    signals = strategy.generate_signals(synthetic_data)
+                    
+                    # Calculate returns
+                    returns = self.calculate_returns(synthetic_data, signals)
+                    
+                    # Calculate metrics for this simulation
+                    metrics = self._calculate_simulation_metrics(returns)
+                    metrics['simulation_id'] = i
+                    
+                    # Store simulation metrics
+                    simulation_results.append(metrics)
+                    
+                except Exception as e:
+                    logger.warning(f"Error in simulation {i}: {e}")
+                    continue
+                    
+            # Convert results to DataFrame
             return pd.DataFrame(simulation_results)
-
+            
         except Exception as e:
             logger.error(f"Error in Monte Carlo simulation: {e}")
-            raise
-
-
-
-
-    def _generate_synthetic_data(self) -> pd.DataFrame:
-        """
-        Generate synthetic price data for Monte Carlo simulation.
-
-        Returns:
-            DataFrame containing synthetic price data
-        """
+            return pd.DataFrame()
+        
+    def _generate_synthetic_data(self, days: int) -> pd.DataFrame:
+        """Generate synthetic market data for simulation."""
         try:
-            # Get historical parameters
-            returns = np.log(
-                self.data['close'] / self.data['close'].shift(1)
-            ).dropna()
+            returns = self.data['close'].pct_change().dropna()
             
+            # Calculate distribution parameters
             mu = returns.mean()
             sigma = returns.std()
+            skew = returns.skew()
+            kurt = returns.kurtosis()
             
-            # Generate random returns
-            n_days = len(self.data)
-            random_returns = np.random.normal(mu, sigma, n_days)
+            # Generate random returns with similar properties
+            random_returns = np.random.normal(mu, sigma, days)
             
             # Generate synthetic prices
-            synthetic_prices = self.data['close'].iloc[0] * np.exp(
-                np.cumsum(random_returns)
-            )
+            last_price = self.data['close'].iloc[-1]
+            synthetic_prices = last_price * np.exp(np.cumsum(random_returns))
             
-            # Create synthetic DataFrame
-            synthetic_data = pd.DataFrame(index=self.data.index)
+            # Generate synthetic OHLCV data
+            dates = pd.date_range(start=self.data.index[-1] + pd.Timedelta(days=1), periods=days)
+            synthetic_data = pd.DataFrame(index=dates)
+            
             synthetic_data['close'] = synthetic_prices
-            synthetic_data['open'] = synthetic_prices * np.random.uniform(
-                0.99, 1.01, n_days
-            )
-            synthetic_data['high'] = synthetic_prices * np.random.uniform(
-                1.001, 1.02, n_days
-            )
-            synthetic_data['low'] = synthetic_prices * np.random.uniform(
-                0.98, 0.999, n_days
-            )
-            synthetic_data['volume'] = np.random.randint(
-                100000, 1000000, n_days
-            )
-
+            synthetic_data['open'] = synthetic_prices * np.random.uniform(0.99, 1.01, days)
+            synthetic_data['high'] = synthetic_data[['open', 'close']].max(axis=1) * np.random.uniform(1.001, 1.02, days)
+            synthetic_data['low'] = synthetic_data[['open', 'close']].min(axis=1) * np.random.uniform(0.98, 0.999, days)
+            synthetic_data['volume'] = np.random.lognormal(np.log(self.data['volume'].mean()), 
+                                                         self.data['volume'].std(), 
+                                                         days)
+            
             return synthetic_data
-
+            
         except Exception as e:
             logger.error(f"Error generating synthetic data: {e}")
             raise
+    
+    def calculate_performance_metrics(self, data: Optional[pd.DataFrame] = None) -> Dict[str, float]:
+        """Calculate comprehensive performance metrics.
 
-    def _calculate_performance_metrics(self) -> PerformanceMetrics:
-        """
-        Calculate comprehensive performance metrics.
+        Args:
+            data: Optional DataFrame to calculate metrics for. If None, uses self.results
 
         Returns:
-            PerformanceMetrics object containing calculated metrics
-
-        Raises:
-            ValueError: If results are not available
+            Dictionary containing various performance metrics
         """
         try:
-            if self.results is None:
-                raise ValueError("Backtest hasn't been run yet")
-
-            returns = self.results['Strategy_Returns'].dropna()
+            if self.results is None and data is None:
+                raise ValueError("Backtest hasn't been run yet. Call run_backtest() first.")
+                
+            # Use provided data or fall back to self.results
+            results_df = data if data is not None else self.results
             
-            # Calculate key metrics
+            if results_df.empty:
+                return {
+                    'total_return': 0.0,
+                    'annual_return': 0.0,
+                    'sharpe_ratio': 0.0,
+                    'volatility': 0.0,
+                    'max_drawdown': 0.0,
+                    'win_rate': 0.0,
+                    'profit_factor': 0.0
+                }
+
+            returns = results_df['Strategy_Returns'].dropna()
+            
+            # Calculate returns
             total_return = (1 + returns).prod() - 1
-            annual_return = (1 + total_return) ** (
-                252 / len(returns)
-            ) - 1
-            volatility = returns.std() * np.sqrt(252)
-            sharpe = (
-                (annual_return - self.config.risk_free_rate) / 
-                volatility
-            )
+            annual_return = (1 + total_return) ** (252 / len(returns)) - 1
             
-            # Calculate other metrics
-            max_drawdown = self.results['Drawdown'].max()
-            win_rate = (returns > 0).mean()
-            profit_factor = abs(
-                returns[returns > 0].sum() / 
-                returns[returns < 0].sum()
-            )
-
-            return PerformanceMetrics(
-                sharpe_ratio=sharpe,
-                win_rate=win_rate,
-                profit_factor=profit_factor,
-                max_drawdown=max_drawdown,
-                volatility=volatility
-            )
+            # Calculate volatility
+            volatility = returns.std() * np.sqrt(252)
+            risk_free_rate: float = 0.02 
+            # Calculate Sharpe ratio
+            excess_returns = returns - risk_free_rate / 252  # Daily risk-free rate
+            sharpe_ratio = np.sqrt(252) * excess_returns.mean() / returns.std() if returns.std() != 0 else 0
+            
+            # Calculate maximum drawdown
+            cumulative_returns = (1 + returns).cumprod()
+            running_max = cumulative_returns.expanding().max()
+            drawdowns = (cumulative_returns - running_max) / running_max
+            max_drawdown = abs(drawdowns.min()) if len(drawdowns) > 0 else 0
+            
+            # Calculate win rate
+            winning_trades = (returns > 0).sum()
+            total_trades = len(returns[returns != 0])
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0
+            
+            # Calculate profit factor
+            gross_profits = returns[returns > 0].sum()
+            gross_losses = abs(returns[returns < 0].sum())
+            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
+            risk_free_rate: float = 0.02
+            # Calculate sortino ratio
+            downside_returns = returns[returns < 0]
+            downside_std = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0
+            sortino_ratio = (annual_return - risk_free_rate) / downside_std if downside_std != 0 else 0
+            
+            # Calculate Calmar ratio
+            calmar_ratio = annual_return / max_drawdown if max_drawdown != 0 else float('inf')
+            
+            return {
+                'total_return': total_return,
+                'annual_return': annual_return,
+                'sharpe_ratio': sharpe_ratio,
+                'sortino_ratio': sortino_ratio,
+                'calmar_ratio': calmar_ratio,
+                'volatility': volatility,
+                'max_drawdown': max_drawdown,
+                'win_rate': win_rate,
+                'profit_factor': profit_factor,
+                'total_trades': total_trades,
+                'avg_return': returns.mean(),
+                'avg_win': returns[returns > 0].mean() if len(returns[returns > 0]) > 0 else 0,
+                'avg_loss': returns[returns < 0].mean() if len(returns[returns < 0]) > 0 else 0,
+                'best_trade': returns.max(),
+                'worst_trade': returns.min(),
+                'recovery_factor': abs(total_return / max_drawdown) if max_drawdown != 0 else float('inf'),
+                'risk_adjusted_return': annual_return / volatility if volatility != 0 else 0
+            }
 
         except Exception as e:
             logger.error(f"Error calculating performance metrics: {e}")
             raise
-
+    
     def generate_report(self, 
                        output_path: Optional[Path] = None) -> Dict[str, Any]:
         """

@@ -389,14 +389,14 @@ class ModelTrainer:
             
             # Return comprehensive metrics
             return {
-                'sharpe_ratio': metrics.sharpe_ratio,
-                'win_rate': metrics.win_rate,
-                'profit_factor': metrics.profit_factor,
-                'max_drawdown': metrics.max_drawdown,
-                'volatility': metrics.volatility,
+                'sharpe_ratio': metrics['sharpe_ratio'] if 'sharpe_ratio' in metrics else 0.0,
+                'win_rate': metrics['win_rate'] if 'win_rate' in metrics else 0.0,
+                'profit_factor': metrics['profit_factor'] if 'profit_factor' in metrics else 0.0,
+                'max_drawdown': metrics['max_drawdown'] if 'max_drawdown' in metrics else 0.0,
+                'volatility': metrics['volatility'] if 'volatility' in metrics else 0.0,
                 'market_condition_stats': market_condition_stats,
                 'trading_stats': trading_stats,
-                'total_trades': len(backtest_results),
+                'total_trades': trading_stats.get('total_trades', 0),
                 'average_trade_duration': trading_stats.get('avg_trade_duration', 0),
                 'max_consecutive_losses': trading_stats.get('max_consecutive_losses', 0),
                 'recovery_factor': trading_stats.get('recovery_factor', 0)

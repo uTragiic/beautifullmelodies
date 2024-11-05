@@ -331,25 +331,30 @@ class OverfittingController:
         Returns:
             Dictionary of adjusted parameters
         """
+  # Initialize current_params to ensure it's defined
+        current_params = {}
+
         try:
-            current_params = model.get_params()
+            # Corrected method name to match the actual method in your model class
+            current_params = model.get_parameters()  # Changed from get_params() to get_parameters()
             adjustment_strength = min(overfitting_scores['final_score'], 0.5)
-            
+
             # Adjust for complexity if needed
             if overfitting_scores['complexity_score'] > self.max_complexity_score:
                 current_params = self._reduce_complexity(current_params, adjustment_strength)
-            
+
             # Adjust for stability if needed
             if overfitting_scores['stability_score'] > self.parameter_stability_threshold:
                 current_params = self._increase_regularization(current_params, adjustment_strength)
-            
+
             # Apply regime-specific adjustments
             current_params = self._apply_regime_adjustments(current_params, market_regime)
-            
+
             # Update adjustment history
             self.adjustment_history.append(current_params)
-            
+
             return current_params
+
             
         except Exception as e:
             logger.error(f"Error adjusting model: {e}")

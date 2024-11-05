@@ -26,7 +26,7 @@ from sklearn.preprocessing import RobustScaler, StandardScaler
 from ta import add_all_ta_features
 from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.trend import ADXIndicator, MACD, SMAIndicator
-from ta.volume import OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
+from ta.volume import OnBalancevolumeIndicator, volumeWeightedAveragePrice
 from ta.volatility import AverageTrueRange, BollingerBands
 from tqdm import tqdm
 
@@ -95,7 +95,7 @@ class EnhancedBacktest:
         data['SMA50'] = data['close'].rolling(window=50).mean()
         data['SMA200'] = data['close'].rolling(window=200).mean()
         data['Volatility'] = data['Returns'].rolling(window=20).std() * np.sqrt(252)
-        data['Volume_MA'] = data['Volume'].rolling(window=20).mean()
+        data['volume_MA'] = data['volume'].rolling(window=20).mean()
         data['Momentum'] = data['close'].pct_change(periods=20)
 
         conditions = []
@@ -122,10 +122,10 @@ class EnhancedBacktest:
             else:
                 volatility = 'Medium'
 
-            # Volume
-            if current['Volume'] > current['Volume_MA'] * 1.5:
+            # volume
+            if current['volume'] > current['volume_MA'] * 1.5:
                 volume = 'High'
-            elif current['Volume'] < current['Volume_MA'] * 0.5:
+            elif current['volume'] < current['volume_MA'] * 0.5:
                 volume = 'Low'
             else:
                 volume = 'Normal'
@@ -138,7 +138,7 @@ class EnhancedBacktest:
             else:
                 momentum = 'Neutral'
 
-            condition = f"{trend}-{volatility}_Volatility-{volume}_Volume-{momentum}_Momentum"
+            condition = f"{trend}-{volatility}_Volatility-{volume}_volume-{momentum}_Momentum"
             conditions.append(condition)
 
         return pd.Series(conditions, index=data.index)
@@ -210,7 +210,7 @@ class EnhancedBacktest:
             'Open': sim_prices * np.random.uniform(0.99, 1.01, days),
             'High': sim_prices * np.random.uniform(1.001, 1.02, days),
             'Low': sim_prices * np.random.uniform(0.98, 0.999, days),
-            'Volume': np.random.randint(100000, 1000000, days)
+            'volume': np.random.randint(100000, 1000000, days)
         }, index=dates)
 
         return synthetic_data
@@ -301,7 +301,7 @@ class IndicatorCalculator:
             
             df['ATR'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
             
-            df['OBV'] = OnBalanceVolumeIndicator(close=df['close'], volume=df['volume']).on_balance_volume()
+            df['OBV'] = OnBalancevolumeIndicator(close=df['close'], volume=df['volume']).on_balance_volume()
             
             df['ADX'] = ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14).adx()
             
@@ -310,14 +310,14 @@ class IndicatorCalculator:
             df['BB_lower'] = bb.bollinger_lband()
             df['BB_width'] = (df['BB_upper'] - df['BB_lower']) / df['close']
             
-            df['VWAP'] = VolumeWeightedAveragePrice(high=df['high'], low=df['low'], close=df['close'], volume=df['volume']).volume_weighted_average_price()
+            df['VWAP'] = volumeWeightedAveragePrice(high=df['high'], low=df['low'], close=df['close'], volume=df['volume']).volume_weighted_average_price()
             
             # Vectorized operations for performance
             df['RSI_Z'] = (df['RSI'] - df['RSI'].rolling(window=50).mean()) / df['RSI'].rolling(window=50).std()
             df['MACD_Z'] = (df['MACD_diff'] - df['MACD_diff'].rolling(window=50).mean()) / df['MACD_diff'].rolling(window=50).std()
             df['Momentum'] = df['close'].pct_change(periods=20)
-            df['Volume_SMA'] = df['volume'].rolling(window=20).mean()
-            df['Volume_Ratio'] = df['volume'] / df['Volume_SMA']
+            df['volume_SMA'] = df['volume'].rolling(window=20).mean()
+            df['volume_Ratio'] = df['volume'] / df['volume_SMA']
             
             return df
         except Exception as e:
@@ -331,9 +331,9 @@ class MarketConditionAnalyzer:
             last_row = data.iloc[-1]
             trend = "Uptrend" if last_row['SMA_50'] > last_row['SMA_200'] else "Downtrend"
             volatility = "High" if last_row['ATR'] > data['ATR'].mean() else "Low"
-            volume = "High" if last_row['Volume_Ratio'] > 1.5 else "Low"
+            volume = "High" if last_row['volume_Ratio'] > 1.5 else "Low"
             momentum = "Positive" if last_row['Momentum'] > 0 else "Negative"
-            return f"{trend}-{volatility} Volatility-{volume} Volume-{momentum} Momentum"
+            return f"{trend}-{volatility} Volatility-{volume} volume-{momentum} Momentum"
         except Exception as e:
             logger.error(f"Error determining market condition: {e}")
             raise
@@ -472,7 +472,7 @@ class MachineLearningModel:
             random_state=42
         )
         self.feature_columns = [
-            'RSI', 'MACD_diff', 'ADX', 'ATR', 'Volume_Ratio', 
+            'RSI', 'MACD_diff', 'ADX', 'ATR', 'volume_Ratio', 
             'Momentum', 'Stoch_K', 'OBV', 'BB_width', 'VWAP'
         ]
         
@@ -1212,7 +1212,7 @@ class RiskManagement:
 
     def adjust_for_liquidity(self, position_size: float, average_volume: float) -> float:
         """Adjust position size based on liquidity considerations."""
-        max_position_size = average_volume * config.MAX_VOLUME_PERCENTAGE
+        max_position_size = average_volume * config.MAX_vOLUME_PERCENTAGE
         return min(position_size, max_position_size)
 
     def calculate_kelly_criterion(self, win_rate: float, win_loss_ratio: float) -> float:
