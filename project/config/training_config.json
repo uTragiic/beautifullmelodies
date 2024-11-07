@@ -5,6 +5,7 @@
         "update_frequency": "daily"
     },
     "paths": {
+        "config_dir": "config",
         "model_dir": "models",
         "cache_dir": "cache",
         "results_dir": "results",
@@ -35,7 +36,12 @@
         "n_validation_splits": 5,
         "batch_size": 32,
         "learning_rate": 0.001,
-        "early_stopping_patience": 10
+        "early_stopping_patience": 10,
+        "start_dates": {
+            "market": "2020-01-01",
+            "sector": "2020-01-01",
+            "cluster": "2020-01-01"
+        }
     },
     "validation": {
         "min_window": 252,

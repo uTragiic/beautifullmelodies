@@ -1,0 +1,63 @@
+{
+    "timestamp": "2024-11-06T00:14:58.364271",
+    "market_regime": "normal",
+    "performance_comparison": {
+        "in_sample": {
+            "sharpe_ratio": -0.03011453517771349,
+            "win_rate": 0.5294117647058824,
+            "profit_factor": 0.9225926521026983,
+            "max_drawdown": 0.3881035103999971,
+            "volatility": 0.18977230099135511,
+            "total_return": 0.0,
+            "annual_return": 0.0,
+            "sortino_ratio": 0.0,
+            "calmar_ratio": 0.0,
+            "total_trades": 0,
+            "alpha": 0.0,
+            "beta": 0.0,
+            "information_ratio": 0.0,
+            "recovery_factor": 0.0
+        },
+        "out_sample": {
+            "sharpe_ratio": -0.10558309442727488,
+            "win_rate": 0.45722713864306785,
+            "profit_factor": 0.7612119265514489,
+            "max_drawdown": 0.2856381652137115,
+            "volatility": 0.1188677620025027,
+            "total_return": 0.0,
+            "annual_return": 0.0,
+            "sortino_ratio": 0.0,
+            "calmar_ratio": 0.0,
+            "total_trades": 0,
+            "alpha": 0.0,
+            "beta": 0.0,
+            "information_ratio": 0.0,
+            "recovery_factor": 0.0
+        },
+        "degradation": {
+            "sharpe_ratio": 0.07546855924956139,
+            "win_rate": 0.0721846260628145,
+            "profit_factor": 0.16138072555124938,
+            "max_drawdown": 0.10246534518628558,
+            "volatility": 0.07090453898885242
+        }
+    },
+    "overfitting_analysis": {
+        "performance_score": 0.3897829361386279,
+        "stability_score": 0.0,
+        "regime_score": 0.0,
+        "complexity_score": 0.2533333333333333,
+        "final_score": 0.18124650778878448,
+        "threshold": 0.6
+    },
+    "regime_specific_thresholds": {
+        "performance": 0.3,
+        "stability": 0.4,
+        "regime": 0.5,
+        "complexity": 0.7,
+        "final": 0.6
+    },
+    "recommendations": [
+        "Significant performance degradation detected. Consider implementing more robust cross-validation techniques."
+    ]
+}

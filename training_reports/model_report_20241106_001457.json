@@ -1,0 +1,63 @@
+{
+    "timestamp": "2024-11-06T00:14:57.867330",
+    "market_regime": "normal",
+    "performance_comparison": {
+        "in_sample": {
+            "sharpe_ratio": 0.00885158221840834,
+            "win_rate": 0.524008350730689,
+            "profit_factor": 1.0241341190677955,
+            "max_drawdown": 0.197230664263201,
+            "volatility": 0.1794582036043119,
+            "total_return": 0.0,
+            "annual_return": 0.0,
+            "sortino_ratio": 0.0,
+            "calmar_ratio": 0.0,
+            "total_trades": 0,
+            "alpha": 0.0,
+            "beta": 0.0,
+            "information_ratio": 0.0,
+            "recovery_factor": 0.0
+        },
+        "out_sample": {
+            "sharpe_ratio": -0.03818968836886167,
+            "win_rate": 0.4671280276816609,
+            "profit_factor": 0.90490499002974,
+            "max_drawdown": 0.15929761467304612,
+            "volatility": 0.17119375479918136,
+            "total_return": 0.0,
+            "annual_return": 0.0,
+            "sortino_ratio": 0.0,
+            "calmar_ratio": 0.0,
+            "total_trades": 0,
+            "alpha": 0.0,
+            "beta": 0.0,
+            "information_ratio": 0.0,
+            "recovery_factor": 0.0
+        },
+        "degradation": {
+            "sharpe_ratio": 0.04704127058727001,
+            "win_rate": 0.05688032304902807,
+            "profit_factor": 0.11922912903805549,
+            "max_drawdown": 0.037933049590154866,
+            "volatility": 0.008264448805130525
+        }
+    },
+    "overfitting_analysis": {
+        "performance_score": 0.2926697061602388,
+        "stability_score": 0.0,
+        "regime_score": 0.0,
+        "complexity_score": 0.2533333333333333,
+        "final_score": 0.14240121579742887,
+        "threshold": 0.6
+    },
+    "regime_specific_thresholds": {
+        "performance": 0.3,
+        "stability": 0.4,
+        "regime": 0.5,
+        "complexity": 0.7,
+        "final": 0.6
+    },
+    "recommendations": [
+        "Model performance is within acceptable parameters. Continue monitoring for changes in market conditions."
+    ]
+}

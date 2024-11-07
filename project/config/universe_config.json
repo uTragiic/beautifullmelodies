@@ -1,0 +1,94 @@
+{
+    "universe": {
+        "min_price": 5.0,
+        "min_volume": 100000,
+        "min_market_cap": 1000000000,
+        "min_history_days": 756,
+        "exclude_penny_stocks": true,
+        "exclude_otc": true,
+        "exclude_sectors": ["Unknown"]
+    },
+    "clustering": {
+        "n_clusters": 5,
+        "features": [
+            "market_cap",
+            "volume",
+            "volatility",
+            "beta",
+            "sector",
+            "industry"
+        ],
+        "update_frequency": "monthly",
+        "min_cluster_size": 10
+    },
+    "features": {
+        "technical": {
+            "rsi": {
+                "window": 14
+            },
+            "macd": {
+                "fast_period": 12,
+                "slow_period": 26,
+                "signal_period": 9
+            },
+            "bollinger": {
+                "window": 20,
+                "num_std": 2
+            },
+            "atr": {
+                "window": 14
+            }
+        },
+        "fundamental": {
+            "pe_ratio": true,
+            "pb_ratio": true,
+            "debt_to_equity": true,
+            "current_ratio": true,
+            "quick_ratio": true,
+            "roe": true,
+            "roa": true
+        },
+        "market": {
+            "market_cap": true,
+            "volume": true,
+            "volatility": true,
+            "beta": true
+        }
+    },
+    "filters": {
+        "liquidity": {
+            "min_daily_volume": 100000,
+            "min_market_cap": 1000000000,
+            "max_spread_percent": 0.02
+        },
+        "stability": {
+            "min_price_history": 756,
+            "max_volatility": 0.5,
+            "max_gap_percent": 0.1
+        },
+        "quality": {
+            "min_pe_ratio": 0,
+            "max_pe_ratio": 100,
+            "min_current_ratio": 1.0,
+            "max_debt_to_equity": 2.0
+        }
+    },
+    "market_regimes": {
+        "lookback_period": 252,
+        "volatility_threshold": 0.2,
+        "trend_threshold": 0.1,
+        "regime_change_threshold": 0.3
+    },
+    "data_requirements": {
+        "minimum_data_points": 756,
+        "maximum_missing_data": 0.1,
+        "price_data": ["open", "high", "low", "close", "volume"],
+        "fundamental_data": ["market_cap", "pe_ratio", "pb_ratio"],
+        "required_fields": ["symbol", "date", "close", "volume"]
+    },
+    "updates": {
+        "universe_update_frequency": "daily",
+        "feature_update_frequency": "daily",
+        "clustering_update_frequency": "monthly"
+    }
+}

@@ -1,44 +1,45 @@
 # Core dependencies
-numpy>=1.21.0
-pandas>=1.3.0
-scikit-learn>=0.24.0
-ta>=0.7.0
-yfinance>=0.1.63
+numpy
+pandas
+scikit-learn
+ta
+yfinance
 
 # Machine Learning
-statsmodels>=0.12.0
-arch>=4.19.0
-tensorflow>=2.6.0
-keras>=2.6.0
+statsmodels
+arch
+tensorflow
+keras
 
 # Data handling
-sqlalchemy>=1.4.0
-psycopg2-binary>=2.9.0
-python-dotenv>=0.19.0
+sqlalchemy
+psycopg2-binary
+python-dotenv
 
 # Technical Analysis
-ta-lib>=0.4.0
+ta-lib
 
 # Configuration
-pyyaml>=5.4.0
-python-json-logger>=2.0.0
+pyyaml
+python-json-logger
 
 # Utilities
-tqdm>=4.62.0
-joblib>=1.0.0
-python-dateutil>=2.8.2
+tqdm
+joblib
+python-dateutil
 
 # Testing
-pytest>=6.2.0
-pytest-cov>=2.12.0
-pytest-mock>=3.6.0
+pytest
+pytest-cov
+pytest-mock
 
 # Development
-black>=21.7b0
-flake8>=3.9.0
-mypy>=0.910
-isort>=5.9.0
+black
+flake8
+mypy
+isort
 
 # Documentation
-sphinx>=4.1.0
-sphinx-rtd-theme>=0.5.0
+sphinx
+sphinx-rtd-theme
+TA_Lib-0.4.32-cp311-cp311-win_amd64.whl
