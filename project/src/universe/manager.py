@@ -868,3 +868,53 @@ class UniverseManager:
         except Exception as e:
             logger.error(f"Error analyzing group composition: {e}")
             return {}
+
+    def _calculate_beta(self, returns: pd.Series) -> float:
+        """
+        Calculate beta relative to SPY.
+
+        Args:
+            returns: Series of asset returns to calculate beta for
+
+        Returns:
+            float: Calculated beta value, defaults to 1.0 if calculation fails
+
+        Raises:
+            Exception: If data loading or calculation fails
+        """
+        try:
+            # Load SPY data
+            spy_data = self.db_handler.load_market_data("SPY")
+            spy_returns = spy_data["close"].pct_change()
+
+            # Align dates
+            common_dates = returns.index.intersection(spy_returns.index)
+            if len(common_dates) < 252:  # Require at least 1 year of data
+                logger.warning(
+                    "Insufficient overlapping data points for beta calculation"
+                )
+                return 1.0
+
+            # Get returns for common dates
+            returns = returns.loc[common_dates]
+            spy_returns = spy_returns.loc[common_dates]
+
+            # Calculate beta
+            covariance = returns.cov(spy_returns)
+            variance = spy_returns.var()
+
+            # Handle zero variance case
+            beta = covariance / variance if variance != 0 else 1.0
+
+            # Validate the beta is reasonable
+            if not -5 < beta < 5:  # Cap extreme values
+                logger.warning(
+                    f"Beta calculation produced extreme value: {beta}, defaulting to 1.0"
+                )
+                return 1.0
+
+            return beta
+
+        except Exception as e:
+            logger.warning(f"Error calculating beta: {e}")
+            return 1.0  # Default to market beta on error
