@@ -513,17 +513,117 @@ class TrainingManager:
             # Validate market model with consolidated data
             market_metrics, market_details = self.model_validator.validate_model(
                 model=self.model_trainer.market_model,
-                validation_data=consolidated_market_data,  # Using consolidated data
+                validation_data=consolidated_market_data,
                 model_parameters=self.model_trainer.market_model.get_parameters(),
                 market_regime=self.universe_manager.current_market_regime
             )
-            
-            # Rest of the code remains the same...
-            
+
+            # Train sector models
+            logger.info("Training sector models...")
+            sector_results = {}
+            sector_metrics = {}
+
+            for sector, symbols in self.universe_manager.clusters.items():
+                logger.info(f"Training model for sector: {sector}")
+                sector_data = {sym: all_market_data[sym] for sym in symbols if sym in all_market_data}
+                
+                if not sector_data:
+                    logger.warning(f"No data available for sector {sector}, skipping...")
+                    continue
+                
+                # Train sector model
+                sector_results[sector] = self.model_trainer.train_sector_models(
+                    start_dates=self.config['training']['start_dates']['sector'],
+                    end_date=end_date,
+                    sector_data=sector_data
+                )
+                
+                # Validate sector model
+                sector_metrics[sector], _ = self.model_validator.validate_model(
+                    model=self.model_trainer.sector_models[sector],
+                    validation_data=pd.concat(sector_data.values()),
+                    model_parameters=self.model_trainer.sector_models[sector].get_parameters(),
+                    market_regime=self.universe_manager.current_market_regime
+                )
+
+            # Train cluster models
+            logger.info("Training cluster models...")
+            cluster_results = {}
+            cluster_metrics = {}
+
+            for sector, sector_clusters in self.universe_manager.clusters.items():
+                cluster_results[sector] = {}
+                cluster_metrics[sector] = {}
+                
+                for cluster_name, symbols in sector_clusters.items():
+                    logger.info(f"Training model for cluster {sector}/{cluster_name}")
+                    
+                    # Get cluster data
+                    cluster_data = {sym: all_market_data[sym] for sym in symbols if sym in all_market_data}
+                    
+                    if not cluster_data:
+                        logger.warning(f"No data available for cluster {sector}/{cluster_name}, skipping...")
+                        continue
+                    
+                    # Train cluster model
+                    cluster_results[sector][cluster_name] = self.model_trainer.train_cluster_models(
+                        start_dates=self.config['training']['start_dates']['cluster'],
+                        end_date=end_date,
+                        sector=sector,
+                        cluster=cluster_name,
+                        cluster_data=cluster_data
+                    )
+                    
+                    # Validate cluster model
+                    cluster_metrics[sector][cluster_name], _ = self.model_validator.validate_model(
+                        model=self.model_trainer.cluster_models[sector][cluster_name],
+                        validation_data=pd.concat(cluster_data.values()),
+                        model_parameters=self.model_trainer.cluster_models[sector][cluster_name].get_parameters(),
+                        market_regime=self.universe_manager.current_market_regime
+                    )
+
+            # Save all training results
+            training_results = {
+                'timestamp': datetime.now().isoformat(),
+                'market_model': {
+                    'results': market_results,
+                    'metrics': market_metrics
+                },
+                'sector_models': {
+                    sector: {
+                        'results': sector_results[sector],
+                        'metrics': sector_metrics[sector]
+                    } for sector in sector_results
+                },
+                'cluster_models': {
+                    sector: {
+                        cluster: {
+                            'results': cluster_results[sector][cluster],
+                            'metrics': cluster_metrics[sector][cluster]
+                        } for cluster in cluster_results[sector]
+                    } for sector in cluster_results
+                }
+            }
+
+            # Save results to file
+            results_path = Path(self.config['paths']['results_dir']) / f"training_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(results_path, 'w') as f:
+                json.dump(training_results, f, indent=4)
+
+            # Update training metrics
+            self.training_metrics['end_time'] = datetime.now()
+            self.training_metrics['duration'] = (self.training_metrics['end_time'] - self.training_metrics['start_time']).total_seconds()
+            self.training_metrics['market_metrics'] = market_metrics
+            self.training_metrics['sector_metrics'] = sector_metrics
+            self.training_metrics['cluster_metrics'] = cluster_metrics
+
+            logger.info("Model training completed successfully")
+            return training_results
+
         except Exception as e:
             logger.error(f"Error in model training: {e}")
             raise
-        
+
     def _prepare_consolidated_data(self, market_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
         Prepare consolidated market data for validation.

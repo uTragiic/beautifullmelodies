@@ -38,6 +38,11 @@ class ValidationMetrics:
         """Convert metrics to dictionary."""
         return vars(self)
 
+import logging
+import pandas as pd
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
 class ModelValidator:
     """
     Comprehensive model validation system leveraging existing components.
@@ -57,6 +62,9 @@ class ModelValidator:
             n_monte_carlo: Number of Monte Carlo simulations
             confidence_level: Confidence level for metrics
         """
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+        
         # Initialize existing components
         self.overfitting_controller = OverfittingController(
             base_lookback_period=min_validation_window,
@@ -76,111 +84,106 @@ class ModelValidator:
         # Initialize containers
         self.validation_history: Dict[str, List[ValidationMetrics]] = {}
         
+
     def validate_model(self, 
-                       model: Any,
-                       validation_data: pd.DataFrame,
-                       model_parameters: Dict[str, Any],
-                       market_regime: Optional[str] = None) -> Tuple[ValidationMetrics, Dict[str, Any]]:
+                      model: Any,
+                      training_data: pd.DataFrame,
+                      validation_data: pd.DataFrame,
+                      market_regime: str,
+                      model_parameters: Dict[str, Any] = None,
+                      performance_threshold: float = 0.0) -> Tuple[Dict[str, float], Dict[str, Any]]:
         """
-        Perform comprehensive model validation.
+        Comprehensive model validation including performance, overfitting, and regime analysis.
         
         Args:
-            model: Model to validate
-            validation_data: Data for validation
-            model_parameters: Current model parameters
+            model: The trained model to validate
+            training_data: DataFrame containing training dataset
+            validation_data: DataFrame containing validation dataset
             market_regime: Current market regime
+            model_parameters: Optional dictionary of model parameters
+            performance_threshold: Minimum performance threshold
             
         Returns:
-            Tuple of (validation metrics, detailed results)
+            Tuple of (metrics_dict, validation_details)
         """
         try:
-            # Initialize backtester with validation data
-            backtester = Backtest(validation_data)
+            # Get model parameters if not provided
+            if model_parameters is None:
+                model_parameters = model.get_parameters()
+                
+            # Calculate performance metrics for both datasets
+            train_metrics = self._calculate_performance_metrics(model, training_data)
+            val_metrics = self._calculate_performance_metrics(model, validation_data)
             
-            # Get in-sample and out-of-sample metrics
-            in_sample_metrics, out_sample_metrics = self._get_performance_metrics(
-                backtester, model
-            )
-            
-            # Check for overfitting
+            # Detect overfitting
             is_overfitting, overfitting_scores = self.overfitting_controller.detect_overfitting(
-                in_sample_metrics=in_sample_metrics,
-                out_sample_metrics=out_sample_metrics,
-                market_regime=market_regime,
-                model_parameters=model_parameters
+                train_metrics,
+                val_metrics,
+                market_regime,
+                model_parameters
             )
             
-            adjusted_params = model_parameters.copy()
+            # Calculate validation scores
+            validation_scores = {
+                'sharpe_ratio': val_metrics.sharpe_ratio,
+                'sortino_ratio': val_metrics.sortino_ratio,
+                'max_drawdown': val_metrics.max_drawdown,
+                'win_rate': val_metrics.win_rate,
+                'profit_factor': val_metrics.profit_factor,
+                'recovery_factor': val_metrics.recovery_factor,
+                'volatility': val_metrics.volatility
+            }
+            
+            # Check performance threshold
+            meets_threshold = validation_scores['sharpe_ratio'] >= performance_threshold
+            
+            # Get regime-specific performance
+            regime_performance = self._analyze_regime_performance(model, validation_data, market_regime)
+            
+            # Prepare response
+            metrics_dict = {
+                **validation_scores,
+                'is_overfitting': is_overfitting,
+                'meets_threshold': meets_threshold,
+                'overfitting_score': overfitting_scores['final_score']
+            }
+            
+            validation_details = {
+                'performance_metrics': {
+                    'training': train_metrics.to_dict(),
+                    'validation': val_metrics.to_dict()
+                },
+                'overfitting_analysis': overfitting_scores,
+                'regime_analysis': regime_performance,
+                'model_parameters': model_parameters
+            }
+            
+            # If overfitting detected, get adjustment recommendations
             if is_overfitting:
-                # Get adjusted parameters from overfitting controller
                 adjusted_params = self.overfitting_controller.adjust_model(
-                    model=model,
-                    overfitting_scores=overfitting_scores,
-                    market_regime=market_regime
+                    model,
+                    overfitting_scores,
+                    market_regime
                 )
-                logger.warning(f"Overfitting detected, parameters adjusted: {adjusted_params}")
-            
-            # Generate overfitting analysis report
-            report = self.overfitting_controller.generate_report(
-                in_sample_metrics=in_sample_metrics,
-                out_sample_metrics=out_sample_metrics,
-                market_regime=market_regime,
-                overfitting_scores=overfitting_scores
-            )
-            
-            # Run Monte Carlo simulation using EnhancedBacktest
-            monte_carlo_results = backtester.run_monte_carlo(
-                strategy=model,
-                num_simulations=self.n_monte_carlo,
-                simulation_length=self.min_validation_window
-            )
-            
-            # Calculate comprehensive validation metrics
-            metrics = self._calculate_validation_metrics(
-                out_sample_metrics,
-                monte_carlo_results,
+                validation_details['recommended_adjustments'] = adjusted_params
+                
+            # Generate detailed report
+            validation_details['report'] = self.overfitting_controller.generate_report(
+                train_metrics,
+                val_metrics,
+                market_regime,
                 overfitting_scores
             )
             
-            # Compile detailed results
-            detailed_results = {
-                'is_overfitting': is_overfitting,
-                'overfitting_scores': overfitting_scores,
-                'adjusted_parameters': adjusted_params,
-                'overfitting_report': report,
-                'monte_carlo_results': monte_carlo_results,
-                'regime_performance': self._analyze_regime_performance(
-                    validation_data, model
-                )
-            }
-            
             # Update validation history
-            self._update_validation_history(metrics)
+            self._update_validation_history(metrics_dict)
             
-            return metrics, detailed_results
-                
+            return metrics_dict, validation_details
+            
         except Exception as e:
-            logger.error(f"Error in model validation: {e}")
-            raise
-                
-    def _get_performance_metrics(self,
-                                 backtester: Backtest,
-                                 model: Any) -> Tuple[PerformanceMetrics, PerformanceMetrics]:
-        """Get in-sample and out-of-sample performance metrics."""
-        # Run backtest with walk-forward optimization
-        results = backtester.run_backtest(model)
+            self.logger.error(f"Error in model validation: {str(e)}", exc_info=True)
+            raise ValueError(f"Model validation failed: {str(e)}")    
         
-        # Split results into in-sample and out-of-sample periods
-        split_idx = int(len(results) * 0.7)
-        in_sample = results.iloc[:split_idx]
-        out_sample = results.iloc[split_idx:]
-        
-        # Calculate metrics
-        in_sample_metrics = backtester.calculate_performance_metrics(in_sample)
-        out_sample_metrics = backtester.calculate_performance_metrics(out_sample)
-        
-        return in_sample_metrics, out_sample_metrics
-                
     def _calculate_validation_metrics(self,
                                 performance_metrics: dict,
                                 monte_carlo_results: pd.DataFrame,
@@ -214,49 +217,57 @@ class ModelValidator:
                                     data: pd.DataFrame,
                                     model: Any) -> Dict[str, Dict[str, float]]:
         """Analyze model performance across different market regimes."""
-        regime_performance = {}
-        
-        # Get market conditions for validation period
-        market_conditions = self.market_analyzer.determine_market_condition(data)
-        
-        # Add market conditions to data
-        data = data.copy()
-        data['Market_Regime'] = market_conditions
-        
-        # Calculate performance metrics for each regime
-        for regime in MarketRegime:
-            regime_data = data[data['Market_Regime'] == regime.value]
-            if regime_data.empty:
-                continue
-                
-            # Initialize backtester for regime data
-            regime_backtester = Backtest(regime_data)
-            results = regime_backtester.run_backtest(model)
-            regime_metrics = regime_backtester.calculate_performance_metrics(results)
+        try:
+            regime_performance = {}
             
-            regime_performance[regime.value] = {
-                'sharpe_ratio': regime_metrics.sharpe_ratio,
-                'win_rate': regime_metrics.win_rate,
-                'profit_factor': regime_metrics.profit_factor,
-                'max_drawdown': regime_metrics.max_drawdown,
-                'volatility': regime_metrics.volatility
-            }
-                
-        return regime_performance
+            # Get market conditions for validation period
+            market_conditions = self.market_analyzer.determine_market_condition(data)
             
+            # Add market conditions to data
+            data = data.copy()
+            data['Market_Regime'] = market_conditions
+            
+            # Calculate performance metrics for each regime
+            for regime in MarketRegime:
+                regime_data = data[data['Market_Regime'] == regime.value]
+                if regime_data.empty:
+                    continue
+                    
+                # Initialize backtester for regime data
+                regime_backtester = Backtest(regime_data)
+                results = regime_backtester.run_backtest(model)
+                regime_metrics = regime_backtester.calculate_performance_metrics(results)
+                
+                regime_performance[regime.value] = {
+                    'sharpe_ratio': regime_metrics.sharpe_ratio,
+                    'win_rate': regime_metrics.win_rate,
+                    'profit_factor': regime_metrics.profit_factor,
+                    'max_drawdown': regime_metrics.max_drawdown,
+                    'volatility': regime_metrics.volatility
+                }
+                    
+            return regime_performance
+        except Exception as e:
+            self.logger.error(f"Error analyzing regime performance: {e}")
+            raise
+                
     def _update_validation_history(self, metrics: ValidationMetrics) -> None:
         """Update validation history with new metrics."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        if timestamp not in self.validation_history:
-            self.validation_history[timestamp] = []
+        try:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
-        self.validation_history[timestamp].append(metrics)
-        
-        # Maintain history length
-        if len(self.validation_history) > 100:  # Keep last 100 validations
-            oldest_key = min(self.validation_history.keys())
-            del self.validation_history[oldest_key]
+            if timestamp not in self.validation_history:
+                self.validation_history[timestamp] = []
+                
+            self.validation_history[timestamp].append(metrics)
+            
+            # Maintain history length
+            if len(self.validation_history) > 100:  # Keep last 100 validations
+                oldest_key = min(self.validation_history.keys())
+                del self.validation_history[oldest_key]
+        except Exception as e:
+            self.logger.error(f"Error updating validation history: {e}")
+            raise
                 
     def get_validation_history(self) -> Dict[str, List[ValidationMetrics]]:
         """Get validation history."""
@@ -264,14 +275,16 @@ class ModelValidator:
             
     def get_validation_summary(self) -> pd.DataFrame:
         """Get summary of validation history."""
-        metrics_list = []
-        
-        for timestamp, metrics in self.validation_history.items():
-            for metric in metrics:
-                metric_dict = metric.to_dict()
-                metric_dict['timestamp'] = timestamp
-                metrics_list.append(metric_dict)
-                    
-        return pd.DataFrame(metrics_list)
+        try:
+            metrics_list = []
             
-
+            for timestamp, metrics in self.validation_history.items():
+                for metric in metrics:
+                    metric_dict = metric.to_dict()
+                    metric_dict['timestamp'] = timestamp
+                    metrics_list.append(metric_dict)
+                        
+            return pd.DataFrame(metrics_list)
+        except Exception as e:
+            self.logger.error(f"Error generating validation summary: {e}")
+            raise

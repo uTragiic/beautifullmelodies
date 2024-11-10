@@ -57,12 +57,97 @@ class MarketConditionAnalyzer:
         self.breakout_threshold = breakout_threshold
         self.regime_change_threshold = regime_change_threshold
         
-        # Initialize statistics tracking
         self.condition_stats: Dict[str, MarketStats] = defaultdict(MarketStats)
         self.regime_history: List[Tuple[datetime, MarketRegimeType]] = []
         self.condition_transitions: Dict[Tuple[str, str], int] = defaultdict(int)
         self._current_regime: Optional[MarketRegimeType] = None
 
+        # Define required columns for validation
+        self._required_columns = {
+            'close', 'SMA_50', 'SMA_200', 'BB_upper', 'BB_lower', 
+            'ADX', 'RSI', 'MACD_diff', 'Stoch_K', 'ATR', 
+            'volume', 'Volume_Ratio'
+        }
+
+    def _validate_data(self, data: pd.DataFrame) -> None:
+        """
+        Validate that all required indicators and data properties are present and valid.
+        
+        Args:
+            data: DataFrame with price and indicator data
+            
+        Raises:
+            ValueError: If data validation fails
+        """
+        try:
+            # Check for required columns
+            missing_columns = self.required_indicators - set(data.columns)
+            if missing_columns:
+                raise ValueError(f"Missing required columns: {missing_columns}")
+
+            # Check for required price columns
+            price_columns = {'open', 'high', 'low', 'close', 'volume'}
+            missing_price_cols = price_columns - set(data.columns)
+            if missing_price_cols:
+                raise ValueError(f"Missing required price columns: {missing_price_cols}")
+
+            # Check for NaN values
+            nan_check = data[list(self.required_indicators)].isna()
+            if nan_check.any().any():
+                problematic_cols = nan_check.any()[nan_check.any()].index.tolist()
+                nan_counts = nan_check.sum()[nan_check.sum() > 0]
+                raise ValueError(
+                    f"NaN values found in indicators: "
+                    f"{dict(zip(problematic_cols, nan_counts))}"
+                )
+
+            # Check for infinite values
+            inf_check = np.isinf(data[list(self.required_indicators)])
+            if inf_check.any().any():
+                problematic_cols = inf_check.any()[inf_check.any()].index.tolist()
+                raise ValueError(f"Infinite values found in indicators: {problematic_cols}")
+
+            # Check data length
+            min_required_length = 200  # Based on longest indicator lookback
+            if len(data) < min_required_length:
+                raise ValueError(
+                    f"Insufficient data points. Required: {min_required_length}, "
+                    f"Got: {len(data)}"
+                )
+
+            # Check data freshness
+            max_staleness_days = 1  # Maximum allowed age of most recent data point
+            latest_date = pd.to_datetime(data.index[-1])
+            staleness = (pd.Timestamp.now() - latest_date).days
+            if staleness > max_staleness_days:
+                raise ValueError(
+                    f"Data is too stale. Latest point is {staleness} days old. "
+                    f"Maximum allowed: {max_staleness_days}"
+                )
+
+            # Verify indicator ranges
+            validation_rules = {
+                'RSI': (0, 100),
+                'ADX': (0, 100),
+                'Stoch_K': (0, 100),
+                'Volume_Ratio': (0, np.inf)
+            }
+
+            for indicator, (min_val, max_val) in validation_rules.items():
+                values = data[indicator]
+                if (values < min_val).any() or (values > max_val).any():
+                    invalid_count = ((values < min_val) | (values > max_val)).sum()
+                    raise ValueError(
+                        f"{indicator} has {invalid_count} values outside valid "
+                        f"range [{min_val}, {max_val}]"
+                    )
+
+            self.logger.info("Data validation completed successfully")
+
+        except Exception as e:
+            self.logger.error(f"Data validation failed: {str(e)}")
+            raise 
+        
     def determine_market_condition(self, data: pd.DataFrame) -> str:
         """
         Determine the current market condition with enhanced analysis.

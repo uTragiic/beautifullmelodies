@@ -295,7 +295,7 @@ class ModelTrainer:
             raise
             
     def _prepare_market_data(self, start_date: str, end_date: str) -> pd.DataFrame:
-        """Prepare market-wide training data."""
+        """Prepare market-wide training data with technical indicators."""
         try:
             logger.info(f"Loading market data from {start_date} to {end_date}")
             
@@ -306,7 +306,7 @@ class ModelTrainer:
                 raise ValueError("No market data loaded")
                 
             # Add check for minimum data points
-            min_required_points = 100  # Based on lookback period
+            min_required_points = 200  # Increased to account for SMA200
             if len(market_data) < min_required_points:
                 logger.warning(f"Insufficient data points ({len(market_data)}), attempting to load more historical data")
                 # Try loading more historical data
@@ -318,12 +318,30 @@ class ModelTrainer:
             
             logger.info(f"Loaded {len(market_data)} data points")
             
-            # Rest of the data preparation...
+            # Calculate technical indicators
+            indicator_calculator = IndicatorCalculator()
+            market_data = indicator_calculator.calculate_indicators(market_data)
+            
+            # Verify all required indicators are present
+            self._verify_indicators(market_data)
+            
             return market_data
             
         except Exception as e:
             logger.error(f"Error preparing market data: {e}")
             raise
+
+    def _verify_indicators(self, data: pd.DataFrame) -> None:
+        """Verify all required indicators are present in the DataFrame."""
+        required_indicators = {
+            'RSI', 'MACD_diff', 'SMA_200', 'ADX', 'BB_upper', 
+            'ATR', 'Volume_Ratio', 'SMA_50', 'BB_lower', 'Stoch_K'
+        }
+        
+        missing_indicators = required_indicators - set(data.columns)
+        if missing_indicators:
+            raise ValueError(f"Missing required indicators: {missing_indicators}")
+        
     def _prepare_sector_data(self,
                            symbols: List[str],
                            start_date: str,

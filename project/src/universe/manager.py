@@ -153,6 +153,22 @@ class UniverseManager:
         except Exception as e:
             logger.error(f"Error calculating market regime: {e}")
             return self.current_market_regime
+        
+    def _calculate_beta(self, returns: pd.Series) -> float:
+        """Calculate beta relative to market returns."""
+        try:
+            market_returns = self.data['close'].pct_change().dropna()
+            if len(market_returns) != len(returns):
+                market_returns = market_returns.iloc[-len(returns):]
+            
+            covariance = returns.cov(market_returns)
+            market_variance = market_returns.var()
+            
+            return covariance / market_variance if market_variance != 0 else 1.0
+            
+        except Exception:
+            return 1.0
+
     def _validate_spy_data(self) -> bool:
         """
         Ensure SPY data is available and valid.
