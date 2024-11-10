@@ -52,7 +52,7 @@ class DataManager:
             raise ValueError("Failed to preload SPY data") from e
 
     def get_market_data(
-            self, symbols: List[str], start_date: str, end_date: str
+        self, symbols: List[str], start_date: str, end_date: str
     ) -> Dict[str, pd.DataFrame]:
         """Get market data efficiently using caching and memory mapping."""
         # Ensure SPY is always included
@@ -325,8 +325,8 @@ class TrainingManager:
             return
 
         checkpoint_path = (
-                self.checkpoint_dir
-                / f"checkpoint_{stage}_{now.strftime('%Y%m%d_%H%M%S')}.pkl"
+            self.checkpoint_dir
+            / f"checkpoint_{stage}_{now.strftime('%Y%m%d_%H%M%S')}.pkl"
         )
 
         with open(checkpoint_path, "wb") as f:
@@ -340,12 +340,12 @@ class TrainingManager:
         """Clean up and save training results and report."""
         # Save results
         results_path = (
-                self.results_dir
-                / f"training_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            self.results_dir
+            / f"training_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         )
         report_path = (
-                self.results_dir
-                / f"training_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            self.results_dir
+            / f"training_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         )
 
         with open(results_path, "w") as f:
@@ -370,7 +370,7 @@ class TrainingManager:
             checkpoint.unlink()
 
     def _train_model_parallel(
-            self, model_info: Tuple[str, str, str, Dict]
+        self, model_info: Tuple[str, str, str, Dict]
     ) -> Dict[str, Any]:
         """Train a single model in parallel."""
         model_type, identifier, start_date, data = model_info
@@ -535,7 +535,7 @@ class TrainingManager:
             raise
 
     def _prepare_consolidated_data(
-            self, market_data: Dict[str, pd.DataFrame]
+        self, market_data: Dict[str, pd.DataFrame]
     ) -> pd.DataFrame:
         """
         Prepare consolidated market data for validation.
@@ -602,11 +602,11 @@ class TrainingManager:
             raise
 
     def _organize_training_results(
-            self,
-            market_results: Dict,
-            market_metrics: pd.DataFrame,
-            training_results: List[Dict],
-            universe_stats: Dict,
+        self,
+        market_results: Dict,
+        market_metrics: pd.DataFrame,
+        training_results: List[Dict],
+        universe_stats: Dict,
     ) -> Dict:
         """Organize all training results into a structured format."""
         sector_results = {}
@@ -660,7 +660,7 @@ class TrainingManager:
                 "duration": str(datetime.now() - self.training_metrics["start_time"]),
                 "max_memory_usage": max(self.training_metrics["memory_usage"]),
                 "avg_memory_usage": sum(self.training_metrics["memory_usage"])
-                                    / len(self.training_metrics["memory_usage"]),
+                / len(self.training_metrics["memory_usage"]),
                 "training_progress": self.training_metrics["training_progress"],
             },
         }
@@ -682,8 +682,8 @@ class TrainingManager:
             "timestamp": datetime.now().isoformat(),
             "overview": {
                 "total_models_trained": len(results["sector_models"])
-                                        + sum(len(clusters) for clusters in results["cluster_models"].values())
-                                        + 1,
+                + sum(len(clusters) for clusters in results["cluster_models"].values())
+                + 1,
                 "training_duration": results["training_metrics"]["duration"],
                 "memory_usage": {
                     "max": results["training_metrics"]["max_memory_usage"],
@@ -720,7 +720,7 @@ class TrainingManager:
         return report
 
     def _analyze_model_performance(
-            self, metrics: Dict[str, float], model_type: str
+        self, metrics: Dict[str, float], model_type: str
     ) -> Dict[str, Any]:
         """Analyze performance metrics for a specific model."""
         analysis = {
@@ -782,7 +782,7 @@ class TrainingManager:
         return max(0, min(1, normalized))
 
     def _identify_problematic_models(
-            self, results: Dict[str, Any]
+        self, results: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """Identify models with potential issues."""
         problematic_models = []
