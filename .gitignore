@@ -163,3 +163,4 @@ cython_debug/
 data/market_data.db
 data/
 beautifulmelodies
+.idea
